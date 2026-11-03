@@ -1,0 +1,260 @@
+import { allocateAll, dueFor } from './allocation';
+import { addMonths } from './dates';
+import { DueRow, normUnit, PRIOR_ITEM, splitAmount } from './dues';
+import { activeUnits, cycleMonths, feeItemNames, isCycleStart, mainItemName, mainItemNames, setUnitItemBaseline, unitBaselines } from './fees';
+import { AppData, Due, Settings, Unit } from './types';
+
+/** 帳單項目對應：帳單內含逾期（例如「10月未繳管理費」「前期未繳」），不列為應繳，與系統欠款比對。 */
+export const BILL_ARREARS = '__arrears__';
+/** 帳單項目對應：照帳單金額列為應繳，不與基準比對（例如年繳沖銷、預繳沖銷、委員減免）。 */
+export const BILL_ASIS = '__asis__';
+/** 帳單項目對應：預繳沖銷（例如年繳沖銷），這個月的應繳由系統已收的預繳款銷帳，不減少應繳。 */
+export const BILL_PREPAID = '__prepaid__';
+/** 帳單內含逾期在應繳中的紀錄名稱（金額 0，只保留帳單金額）。 */
+export const ARREARS_ITEM = '帳單內含逾期';
+export const PREPAID_ITEM = '預繳沖銷';
+/** 系統沒有這戶的預繳款（例如啟用本系統前預繳）時，沖銷照帳單減少應繳。 */
+export const PREPAID_BEFORE_ITEM = '預繳沖銷（啟用前預繳）';
+
+/** 去掉智生活項目名稱前的月份，例如「11月坪數費」→「坪數費」、「10月未繳管理費」→「未繳管理費」。 */
+export const billItemName = (item: string) => item.replace(/^\s*\d{1,2}\s*月\s*/, '').trim() || item.trim();
+
+/** 還沒對應的帳單項目的建議：名稱相同的繳費項目、逾期、照帳單；猜不到回傳空字串。 */
+export function suggestBillItem(name: string, feeItems: string[]): string {
+  if (feeItems.includes(name)) return name;
+  if (/未繳|欠繳|欠款|前期/.test(name)) return BILL_ARREARS;
+  if (/沖銷/.test(name)) return BILL_PREPAID;
+  if (/減免|折讓|減收|預繳|退/.test(name)) return BILL_ASIS;
+  const loose = (s: string) => s.replace(/位|費|清潔/g, '');
+  return feeItems.find((f) => loose(f) && loose(f) === loose(name)) ?? '';
+}
+
+/** 帳單項目目前對應到哪裡：已儲存的對應優先，否則名稱和繳費項目相同時自動對應。 */
+export function resolveBillItem(name: string, settings: Settings): string | undefined {
+  const saved = settings.billItemMap?.[name];
+  if (saved) return saved;
+  return feeItemNames(settings).includes(name) ? name : undefined;
+}
+
+export type BillFlag = 'noBase' | 'offCycle' | 'below' | 'lessArrears' | 'prior';
+
+export interface BillSplit {
+  unitNo: string;
+  owner: string;
+  month: string;
+  cycle: number;
+  /** 智生活帳單金額合計（含逾期、沖銷）。 */
+  bill: number;
+  /** 依基準的本期應繳（已套用「更新基準」的選擇）。 */
+  base: number;
+  /** 沿用之前匯入時的基準（之後調整費率不影響已匯入的月份）。 */
+  frozen: boolean;
+  /** 帳單內含逾期：逾期項目＋繳費項目超過基準的部分。 */
+  carried: number;
+  /** 系統在帳單月份之前尚未繳清的欠款。 */
+  arrears: number;
+  /** 帳單內含、系統卻沒有的欠款，新增為上個月的「前期欠款」。 */
+  prior: number;
+  /** 預繳沖銷由系統預收款銷帳的金額。 */
+  prepaid: number;
+  /** 預繳沖銷但系統沒有預收款、照帳單減少應繳的金額。 */
+  prepaidBefore: number;
+  flags: BillFlag[];
+}
+
+/** 某戶某繳費項目的帳單金額與基準不同：要選擇是否更新基準。 */
+export interface ItemDiff {
+  key: string;
+  unitNo: string;
+  owner: string;
+  month: string;
+  item: string;
+  /** 基準（× 週期月數）。 */
+  base: number;
+  bill: number;
+  cycle: number;
+}
+
+export type DiffDecision = 'update' | 'keep';
+
+export interface BillPlan {
+  /** 帳單上還沒對應到基準費率的項目（去掉月份前綴後的名稱）；有的話不能匯入。 */
+  unmapped: string[];
+  diffs: ItemDiff[];
+  rows: DueRow[];
+  splits: BillSplit[];
+  billed: Set<string>;
+  /** 選擇「更新基準」後的各戶每月基準：戶別 key → 項目 → 每月金額。 */
+  baselineUpdates: Map<string, Map<string, number>>;
+}
+
+/** 帳單月份之前的系統欠款（只看帳單月份前已繳的款項，不含由這個月以後帳單拆出的應繳）。 */
+export function arrearsBefore(data: AppData, month: string): Map<string, number> {
+  const result = allocateAll({
+    ...data,
+    dues: data.dues.filter((d) => d.month < month && !(d.fromBill && d.fromBill >= month)),
+    payments: data.payments.filter((p) => p.paidDate < `${month}-01`),
+  });
+  const out = new Map<string, number>();
+  for (const acc of result.accounts) {
+    let owing = 0;
+    for (const m of acc.dueByMonth.keys()) if (m < month) owing += Math.max(0, dueFor(acc, m) - (acc.paidByMonth.get(m) ?? 0));
+    out.set(acc.key, owing);
+  }
+  return out;
+}
+
+/** 已匯入過的帳單月份：沿用當時各繳費項目的基準（含季繳／年繳拆出的月份）與週期月數。 */
+export function frozenBase(dues: Due[], key: string, month: string): { items: Map<string, number>; cycle: number } | null {
+  const mine = dues.filter((d) => normUnit(d.unitNo) === key && d.kind === 'fee');
+  const first = mine.filter((d) => d.month === month && !d.fromBill);
+  if (!first.length) return null;
+  const rest = mine.filter((d) => d.fromBill === month);
+  const items = new Map<string, number>();
+  for (const d of [...first, ...rest]) if (d.amount) items.set(d.item, (items.get(d.item) ?? 0) + d.amount);
+  return { items, cycle: 1 + new Set(rest.map((d) => d.month)).size };
+}
+
+/**
+ * 匯入每月應繳報表：
+ * 1. 每個帳單項目（去掉月份前綴）都要對應到基準費率的繳費項目、逾期或照帳單，否則不能匯入。
+ * 2. 繳費項目逐戶逐項與基準比對（已匯入過的月份沿用當時的基準）；不同的列出來，選擇「更新基準」或「不更新」。
+ * 3. 本期應繳＝基準（更新後）；逾期項目與超過基準的部分是帳單內含逾期，不重複列為應繳，
+ *    先對應系統既有的欠款，多出來的才新增為上個月的「前期欠款」。照帳單的項目原金額列入。
+ */
+export function planBillImport(
+  data: AppData,
+  rows: DueRow[],
+  opts: { rebase?: boolean; decisions?: Map<string, DiffDecision> } = {},
+): BillPlan {
+  const { settings } = data;
+  const plans = settings.feePlans;
+  const empty = (): BillPlan => ({ unmapped: [], diffs: [], rows: [], splits: [], billed: new Set(), baselineUpdates: new Map() });
+  const target = new Map<string, string | undefined>();
+  for (const r of rows) {
+    const name = billItemName(r.item);
+    if (!target.has(name)) target.set(name, resolveBillItem(name, settings));
+  }
+  const unmapped = Array.from(target.entries()).filter(([, t]) => !t).map(([n]) => n);
+  if (unmapped.length) return { ...empty(), unmapped };
+
+  const units = new Map(activeUnits(settings.units).map((u) => [normUnit(u.unitNo), u]));
+  const mains = mainItemNames(settings);
+  const groups = new Map<string, DueRow[]>();
+  for (const r of rows) {
+    const k = `${normUnit(r.unitNo)}|${r.month}`;
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(r);
+  }
+  let current: ReturnType<typeof allocateAll> | null = null;
+  // 這戶目前可用的預繳款：暫收＋已銷到這個月以後的金額
+  const prepaidAvailable = (key: string, month: string) => {
+    current ??= allocateAll(data);
+    const acc = current.byKey.get(key);
+    if (!acc) return 0;
+    return acc.credit + acc.allocations.filter((a) => a.month >= month).reduce((t, a) => t + a.amount, 0);
+  };
+  const arrearsCache = new Map<string, Map<string, number>>();
+  const arrearsOf = (month: string, key: string) => {
+    if (!arrearsCache.has(month)) arrearsCache.set(month, arrearsBefore(data, month));
+    return arrearsCache.get(month)!.get(key) ?? 0;
+  };
+
+  const plan = empty();
+  for (const [k, list] of groups) {
+    const { unitNo, owner, month } = list[0];
+    const key = normUnit(unitNo);
+    const unit = units.get(key);
+    const frozen = opts.rebase ? null : frozenBase(data.dues, key, month);
+    const cycle = frozen?.cycle ?? unit?.cycle ?? 1;
+    const split: BillSplit = { unitNo, owner, month, cycle, bill: list.reduce((t, r) => t + r.amount, 0), base: 0, frozen: !!frozen, carried: 0, arrears: 0, prior: 0, prepaid: 0, prepaidBefore: 0, flags: [] };
+    plan.splits.push(split);
+    if (!unit) {
+      split.flags.push('noBase');
+      continue;
+    }
+    if (!frozen && !isCycleStart(unit, month)) {
+      split.flags.push('offCycle');
+      continue;
+    }
+
+    const fee = new Map<string, number>();
+    const asis = new Map<string, number>();
+    let arrearsLines = 0;
+    let prepaidLines = 0;
+    for (const r of list) {
+      const name = billItemName(r.item);
+      const t = target.get(name)!;
+      if (t === BILL_ARREARS) arrearsLines += r.amount;
+      else if (t === BILL_PREPAID) prepaidLines += r.amount;
+      else if (t === BILL_ASIS) asis.set(name, (asis.get(name) ?? 0) + r.amount);
+      else {
+        // 對應到「管理費」或任何主方案名稱，都是這戶的主要費用（用這戶主方案的名稱）
+        const item = mains.has(t) ? mainItemName(unit, plans) : t;
+        fee.set(item, (fee.get(item) ?? 0) + r.amount);
+      }
+    }
+    const months = cycleMonths(month, cycle);
+    const base = frozen?.items ?? new Map(Array.from(unitBaselines(unit, plans)).map(([i, v]) => [i, v * months.length]));
+    const effective = new Map<string, number>();
+    for (const item of new Set([...fee.keys(), ...base.keys()])) {
+      const b = fee.get(item) ?? 0;
+      const B = base.get(item) ?? 0;
+      let use = B;
+      if (b !== B) {
+        const dk = `${key}|${month}|${item}`;
+        plan.diffs.push({ key: dk, unitNo, owner, month, item, base: B, bill: b, cycle });
+        if (opts.decisions?.get(dk) === 'update') {
+          use = b;
+          const upd = plan.baselineUpdates.get(key) ?? plan.baselineUpdates.set(key, new Map()).get(key)!;
+          upd.set(item, Math.round(b / months.length));
+        }
+      }
+      if (use) effective.set(item, use);
+    }
+
+    plan.billed.add(k);
+    const feeBill = Array.from(fee.values()).reduce((t, v) => t + v, 0);
+    split.base = Array.from(effective.values()).reduce((t, v) => t + v, 0);
+    split.carried = arrearsLines + Math.max(0, feeBill - split.base);
+    split.arrears = arrearsOf(month, key);
+    if (feeBill < split.base) split.flags.push('below');
+    if (split.carried > split.arrears) {
+      split.prior = split.carried - split.arrears;
+      split.flags.push('prior');
+      plan.rows.push({ unitNo, owner, month: addMonths(month, -1), item: PRIOR_ITEM, amount: split.prior, fromBill: month });
+    } else if (split.carried < split.arrears) {
+      split.flags.push('lessArrears');
+    }
+
+    for (const [item, total] of effective) {
+      splitAmount(total, months.length).forEach((a, i) => {
+        if (i === 0) plan.rows.push({ unitNo, owner, month, item, amount: a, billAmount: fee.get(item) ?? 0, kind: 'fee' });
+        else if (a) plan.rows.push({ unitNo, owner, month: months[i], item, amount: a, fromBill: month, kind: 'fee' });
+      });
+    }
+    for (const [item, b] of fee) if (!effective.has(item)) plan.rows.push({ unitNo, owner, month, item, amount: 0, billAmount: b, kind: 'fee' });
+    for (const [item, a] of asis) plan.rows.push({ unitNo, owner, month, item, amount: a, billAmount: a, kind: 'asis' });
+    if (arrearsLines) plan.rows.push({ unitNo, owner, month, item: ARREARS_ITEM, amount: 0, billAmount: arrearsLines, kind: 'arrears' });
+    if (prepaidLines) {
+      // 沖銷是負數：有預繳款的部分由預繳款銷帳（應繳不變），沒有的部分照帳單減少應繳
+      const offset = -prepaidLines;
+      split.prepaid = Math.max(0, Math.min(offset, prepaidAvailable(key, month)));
+      split.prepaidBefore = offset - split.prepaid;
+      if (split.prepaid) plan.rows.push({ unitNo, owner, month, item: PREPAID_ITEM, amount: 0, billAmount: -split.prepaid, kind: 'prepaid' });
+      if (split.prepaidBefore) plan.rows.push({ unitNo, owner, month, item: PREPAID_BEFORE_ITEM, amount: -split.prepaidBefore, billAmount: -split.prepaidBefore, kind: 'asis' });
+    }
+  }
+  return plan;
+}
+
+/** 套用「更新基準」的選擇到戶別設定（只在匯入時才會改基準）。 */
+export function applyBaselineUpdates(settings: Settings, updates: Map<string, Map<string, number>>): Unit[] {
+  if (!updates.size) return settings.units;
+  return settings.units.map((u) => {
+    const upd = updates.get(normUnit(u.unitNo));
+    if (!upd || u.deletedAt) return u;
+    let next = u;
+    for (const [item, monthly] of upd) next = setUnitItemBaseline(next, item, monthly, settings.feePlans);
+    return next;
+  });
+}

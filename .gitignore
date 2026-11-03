@@ -1,0 +1,22 @@
+# 相依套件與建置產出
+node_modules/
+dist/
+release/
+launcher/build/
+# 由 npm run build / launcher:mac 從 dist 複製產生
+launcher/web/index.html
+
+# 帳務資料（含住戶個資），絕不上傳
+dev-app/
+data/
+ledger*.json
+*.xlsx
+*.xls
+*.csv
+
+# 系統、編輯器與機密
+.DS_Store
+.claude/settings.local.json
+*.log
+.env*
+*.pem

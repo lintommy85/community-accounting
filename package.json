@@ -1,0 +1,31 @@
+{
+  "name": "community-accounting",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node scripts/package-release.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "preview": "vite preview",
+    "launcher:mac": "vite build && cp dist/index.html launcher/web/index.html && docker run --rm --platform linux/amd64 -v \"$PWD/launcher\":/src -w /src -e GOOS=darwin -e GOARCH=arm64 -e CGO_ENABLED=0 -e GOCACHE=/tmp/gocache golang:1.27.3 go build -o build/community-ledger-mac .",
+    "test:launcher": "docker run --rm --platform linux/amd64 -v \"$PWD/launcher\":/src -w /src -e CGO_ENABLED=0 -e GOCACHE=/tmp/gocache golang:1.27.3 go test ./...",
+    "start:mac": "sh scripts/run-mac.sh"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vite-plugin-singlefile": "^2.3.4",
+    "vitest": "^5.0.5"
+  }
+}
