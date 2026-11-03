@@ -1,5 +1,5 @@
 import { allocateAll, dueFor } from './allocation';
-import { addMonths } from './dates';
+import { addMonths, monthEnd } from './dates';
 import { DueRow, normUnit, PRIOR_ITEM, splitAmount } from './dues';
 import { activeUnits, cycleMonths, feeItemNames, isCycleStart, mainItemName, mainItemNames, setUnitItemBaseline, unitBaselines } from './fees';
 import { AppData, Due, Settings, Unit } from './types';
@@ -23,8 +23,8 @@ export const billItemName = (item: string) => item.replace(/^\s*\d{1,2}\s*月\s*
 export function suggestBillItem(name: string, feeItems: string[]): string {
   if (feeItems.includes(name)) return name;
   if (/未繳|欠繳|欠款|前期/.test(name)) return BILL_ARREARS;
-  if (/沖銷/.test(name)) return BILL_PREPAID;
-  if (/減免|折讓|減收|預繳|退/.test(name)) return BILL_ASIS;
+  if (/沖銷|預繳|預收|扣抵/.test(name)) return BILL_PREPAID;
+  if (/減免|折讓|減收|退/.test(name)) return BILL_ASIS;
   const loose = (s: string) => s.replace(/位|費|清潔/g, '');
   return feeItems.find((f) => loose(f) && loose(f) === loose(name)) ?? '';
 }
@@ -59,6 +59,12 @@ export interface BillSplit {
   prepaid: number;
   /** 預繳沖銷但系統沒有預收款、照帳單減少應繳的金額。 */
   prepaidBefore: number;
+  /** 沖銷前這戶可用的預收款。 */
+  prepaidBalance: number;
+  /** 帳單沒有沖銷項目，但這戶有多繳／預繳的預收款：匯入後自動拿來銷本期應繳的金額（等同沖銷）。 */
+  autoPrepaid: number;
+  /** 自動銷帳前這戶的預收款（還沒銷到任何月份的部分）。 */
+  autoBalance: number;
   flags: BillFlag[];
 }
 
@@ -146,12 +152,15 @@ export function planBillImport(
     (groups.get(k) ?? groups.set(k, []).get(k)!).push(r);
   }
   let current: ReturnType<typeof allocateAll> | null = null;
-  // 這戶目前可用的預繳款：暫收＋已銷到這個月以後的金額
+  // 這戶在帳單月底前可用的預收款（含期初預收款），扣掉其他月份的沖銷已經用掉的部分
   const prepaidAvailable = (key: string, month: string) => {
     current ??= allocateAll(data);
     const acc = current.byKey.get(key);
     if (!acc) return 0;
-    return acc.credit + acc.allocations.filter((a) => a.month >= month).reduce((t, a) => t + a.amount, 0);
+    const end = monthEnd(month);
+    const free = acc.free.filter((f) => f.paidDate <= end).reduce((t, f) => t + f.amount, 0);
+    const used = Array.from(acc.offsetUsed).filter(([m]) => m !== month).reduce((t, [, v]) => t + v, 0);
+    return Math.max(0, free - used);
   };
   const arrearsCache = new Map<string, Map<string, number>>();
   const arrearsOf = (month: string, key: string) => {
@@ -166,7 +175,7 @@ export function planBillImport(
     const unit = units.get(key);
     const frozen = opts.rebase ? null : frozenBase(data.dues, key, month);
     const cycle = frozen?.cycle ?? unit?.cycle ?? 1;
-    const split: BillSplit = { unitNo, owner, month, cycle, bill: list.reduce((t, r) => t + r.amount, 0), base: 0, frozen: !!frozen, carried: 0, arrears: 0, prior: 0, prepaid: 0, prepaidBefore: 0, flags: [] };
+    const split: BillSplit = { unitNo, owner, month, cycle, bill: list.reduce((t, r) => t + r.amount, 0), base: 0, frozen: !!frozen, carried: 0, arrears: 0, prior: 0, prepaid: 0, prepaidBefore: 0, prepaidBalance: 0, autoPrepaid: 0, autoBalance: 0, flags: [] };
     plan.splits.push(split);
     if (!unit) {
       split.flags.push('noBase');
@@ -215,7 +224,8 @@ export function planBillImport(
     plan.billed.add(k);
     const feeBill = Array.from(fee.values()).reduce((t, v) => t + v, 0);
     split.base = Array.from(effective.values()).reduce((t, v) => t + v, 0);
-    split.carried = arrearsLines + Math.max(0, feeBill - split.base);
+    // 帳單內含的逾期不會超過帳單合計（例如年繳沖銷後帳單為 0，就沒有逾期）
+    split.carried = Math.max(0, Math.min(arrearsLines + Math.max(0, feeBill - split.base), split.bill));
     split.arrears = arrearsOf(month, key);
     if (feeBill < split.base) split.flags.push('below');
     if (split.carried > split.arrears) {
@@ -236,12 +246,22 @@ export function planBillImport(
     for (const [item, a] of asis) plan.rows.push({ unitNo, owner, month, item, amount: a, billAmount: a, kind: 'asis' });
     if (arrearsLines) plan.rows.push({ unitNo, owner, month, item: ARREARS_ITEM, amount: 0, billAmount: arrearsLines, kind: 'arrears' });
     if (prepaidLines) {
-      // 沖銷是負數：有預繳款的部分由預繳款銷帳（應繳不變），沒有的部分照帳單減少應繳
-      const offset = -prepaidLines;
-      split.prepaid = Math.max(0, Math.min(offset, prepaidAvailable(key, month)));
-      split.prepaidBefore = offset - split.prepaid;
+      // 沖銷是負數：有預收款（含期初預收款）的部分由預收款銷帳（應繳不變），沒有的部分照帳單減少應繳；都不超過本期應繳
+      const offset = Math.min(-prepaidLines, split.base);
+      split.prepaidBalance = prepaidAvailable(key, month);
+      split.prepaid = Math.max(0, Math.min(offset, split.prepaidBalance));
+      split.prepaidBefore = Math.max(0, offset - split.prepaid);
       if (split.prepaid) plan.rows.push({ unitNo, owner, month, item: PREPAID_ITEM, amount: 0, billAmount: -split.prepaid, kind: 'prepaid' });
       if (split.prepaidBefore) plan.rows.push({ unitNo, owner, month, item: PREPAID_BEFORE_ITEM, amount: -split.prepaidBefore, billAmount: -split.prepaidBefore, kind: 'asis' });
+    }
+    // 多繳、預繳還沒銷到的預收款（不含等帳單匯入的暫收款）：匯入後會依序銷本期應繳，等同沖銷
+    current ??= allocateAll(data);
+    const acc = current.byKey.get(key);
+    if (acc) {
+      const credit = Array.from(acc.creditByPayment).filter(([id, v]) => v > 0 && !acc.pendingCredit.has(id)).reduce((t, [, v]) => t + v, 0);
+      const left = Math.max(0, credit - split.prepaid);
+      split.autoBalance = left;
+      split.autoPrepaid = Math.min(left, Math.max(0, split.base - split.prepaid - split.prepaidBefore));
     }
   }
   return plan;

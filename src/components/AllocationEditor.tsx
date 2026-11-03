@@ -48,7 +48,7 @@ export default function AllocationEditor({ payment, account, startMonth, onClose
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()}>
         <h2>調整銷帳：{payment.unitNo} {payment.paidDate} 繳 {formatMoney(payment.amount)} 元</h2>
-        <p className="hint">輸入這筆款項要銷哪幾個月、各銷多少（退款或減收可輸入負數）。只列出有應繳的月份；未分配的金額會列為暫收款。{payment.allocations ? '目前為手動銷帳。' : '目前為系統自動銷帳。'}</p>
+        <p className="hint">輸入這筆款項要銷哪幾個月、各銷多少（退款或減收可輸入負數）。只列出有應繳的月份；未分配的金額列為這戶的預收款（期別的應繳還沒匯入時為暫收款）。{payment.allocations ? '目前為手動銷帳。' : '目前為系統自動銷帳。'}</p>
         <div className="table-wrap short">
           <table>
             <thead><tr><th>月份</th><th className="num">應繳</th><th className="num">其他款項已銷</th><th className="num">本筆銷帳</th></tr></thead>
@@ -73,7 +73,7 @@ export default function AllocationEditor({ payment, account, startMonth, onClose
           </table>
         </div>
         <p className={over ? 'err' : 'hint'}>
-          已分配 {formatMoney(total)} ／ 繳款 {formatMoney(payment.amount)}　{over ? '超過繳款金額' : `未分配（暫收） ${formatMoney(payment.amount - total)}`}
+          已分配 {formatMoney(total)} ／ 繳款 {formatMoney(payment.amount)}　{over ? '超過繳款金額' : `未分配（預收／暫收） ${formatMoney(payment.amount - total)}`}
         </p>
         <div className="form-row modal-actions">
           <button onClick={autoFill}>依月費自動填入</button>

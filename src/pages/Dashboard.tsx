@@ -2,6 +2,7 @@ import type { PageKey } from '../App';
 import type { Go } from '../components/nav';
 import CommunityProfile from '../components/CommunityProfile';
 import { lastMonth, Section, Stat, thisMonth } from '../components/ui';
+import { advancesFromAllocations, allocateAll } from '../lib/allocation';
 import { todayStr } from '../lib/dates';
 import { resolveDepositAccountId } from '../lib/defaults';
 import { activeUnits, unitBaseline } from '../lib/fees';
@@ -18,7 +19,10 @@ export default function Dashboard({ go }: { go: Go }) {
   const bankIds = new Set(data.settings.accounts.filter((a) => a.kind === 'bank').map((a) => a.id));
   const bankBalances = accountBalances(data, today).filter((b) => bankIds.has(b.accountId));
   const bankTotal = bankBalances.reduce((sum, b) => sum + b.closing, 0);
-  const prevReport = monthReport(data, lastMonth());
+  // 撥款對帳還沒核對相符的繳費列為待確認款項，不算進預收款／暫收款
+  const pending = data.payments.filter((p) => !p.voided && !p.depositConfirmed && p.paidDate <= today);
+  const pendingTotal = pending.reduce((sum, p) => sum + p.amount, 0);
+  const adv = data.settings.units.some((u) => !u.deletedAt) ? advancesFromAllocations(allocateAll(data), data.payments, month, { confirmedOnly: true }) : { prepaid: r.prepaid, suspense: r.suspense };
   const units = activeUnits(data.settings.units);
   const overdue = depositGroups(data.payments).filter((g) => g.depositDate <= today && !g.confirmed);
   const lastBackup = [...data.audit].reverse().find((a) => a.action === '下載備份');
@@ -39,7 +43,7 @@ export default function Dashboard({ go }: { go: Go }) {
   if (fileStatus !== 'linked' && fileStatus !== 'service') todos.push({ text: '資料只存在瀏覽器內，建議改用「社區帳務管理.exe」開啟', page: 'backup' });
   if (daysSinceBackup === null || daysSinceBackup > 30) todos.push({ text: daysSinceBackup === null ? '從未下載備份檔' : `已 ${daysSinceBackup} 天未下載備份`, page: 'backup' });
   if (overdue.length) todos.push({ text: `${overdue.length} 筆撥款已到預計日但尚未核對存摺`, page: 'deposits' });
-  if (r.suspense > 0) todos.push({ text: `有 ${r.suspense.toLocaleString('zh-TW')} 元繳費尚無應繳可銷帳（暫收款），請匯入或建立對應月份的每月應繳`, page: 'import', arg: 'dues' });
+  if (r.suspense > 0) todos.push({ text: `有 ${r.suspense.toLocaleString('zh-TW')} 元繳費的期別還沒有每月應繳（暫收款），請匯入對應月份的每月應繳報表`, page: 'import', arg: 'dues' });
   const prev = lastMonth();
   if (data.payments.length && !data.closes.some((c) => c.month === prev)) todos.push({ text: `${prev} 尚未月結`, page: 'month' });
 
@@ -55,10 +59,10 @@ export default function Dashboard({ go }: { go: Go }) {
       <div className="stats">
         <Stat label={`${month} 住戶繳費`} value={r.received.gross} hint={`${r.received.count} 筆`} />
         <Stat label={`${month} 已撥入銀行`} value={r.deposited.gross} hint={`${r.deposited.count} 筆（依報表入帳日）`} />
-        <Stat label={`${lastMonth()} 月底在途存款`} value={prevReport.closingInTransit.gross} hint={`${prevReport.closingInTransit.count} 筆，月底前未入帳`} tone="warn" />
         <Stat label={`${month} 月底在途（目前）`} value={r.closingInTransit.gross} hint={`${r.closingInTransit.count} 筆，入帳日在下月或報表尚無入帳日`} />
-        <Stat label={`${month} 預收款`} value={r.prepaid} hint="已繳，銷到下個月以後的應繳" />
-        {r.suspense !== 0 && <Stat label={`${month} 暫收款`} value={r.suspense} hint="已繳但尚無應繳可銷帳" tone="warn" />}
+        <Stat label="待確認款項" value={pendingTotal} hint={`${pending.length} 筆，撥款對帳尚未核對相符`} tone={pendingTotal ? 'warn' : undefined} onClick={() => go('deposits')} title="前往撥款對帳" />
+        <Stat label={`${month} 預收款`} value={adv.prepaid} hint="已核對的預繳、多繳款項（含期初預收款），每月沖銷後減少" />
+        {adv.suspense !== 0 && <Stat label={`${month} 暫收款`} value={adv.suspense} hint="已核對，期別的每月應繳還沒匯入" tone="warn" />}
       </div>
       <Section title="待辦事項">
         {todos.length === 0 ? (

@@ -168,7 +168,7 @@ export function exportMonthReport(data: AppData, r: MonthReport): Blob {
     ['在途存款', '', '', '', r.closingInTransit.net],
     ['資產合計', '', '', '', r.balances.reduce((sum, b) => sum + b.closing, 0) + r.closingInTransit.net],
     ...(r.prepaid ? [['其中：預收管理費（已入帳，待以後月份銷帳）', '', '', '', r.prepaid]] : []),
-    ...(r.suspense ? [['其中：暫收款（已入帳，尚無應繳可銷帳）', '', '', '', r.suspense]] : []),
+    ...(r.suspense ? [['其中：暫收款（已入帳，期別的每月應繳還沒匯入）', '', '', '', r.suspense]] : []),
   ];
   const ws = XLSX.utils.aoa_to_sheet(summary);
   ws['!cols'] = [{ wch: 30 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
@@ -185,7 +185,7 @@ export function exportMonthReport(data: AppData, r: MonthReport): Blob {
         l.payment.paidDate,
         l.payment.channel,
         l.payment.billPeriod,
-        [...l.allocations.map((a) => `${ml(a.month)} ${a.amount}`), ...(l.credit ? [`暫收 ${l.credit}`] : [])].join('、'),
+        [...l.allocations.map((a) => `${ml(a.month)} ${a.amount}`), ...(l.credit ? [`${l.pending ? '暫收' : '預收'} ${l.credit}`] : [])].join('、'),
         l.payment.amount,
       ]),
       ['', '', '', '', '', '已繳合計', r.paidList.reduce((sum, l) => sum + l.payment.amount, 0)],
@@ -235,7 +235,7 @@ export function exportStatement(data: AppData, title: string, sub: string, st: S
     ...(pos.inTransit ? [['在途存款', '', '', '', pos.inTransit]] : []),
     ['資金合計', '', '', '', pos.balances.reduce((s, b) => s + b.closing, 0) + pos.inTransit],
     ...(pos.prepaid ? [['其中：預收管理費', '', '', '', pos.prepaid]] : []),
-    ...(pos.suspense ? [['其中：暫收款（尚無應繳可銷帳）', '', '', '', pos.suspense]] : []),
+    ...(pos.suspense ? [['其中：暫收款（期別的每月應繳還沒匯入）', '', '', '', pos.suspense]] : []),
     [],
     ['簽章'],
     ...sigRows,

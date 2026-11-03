@@ -192,10 +192,11 @@ table.statement tr.st-net th, table.statement tr.st-net td, table.statement-bala
 }
 
 @media print {
-  .print-mode-report .print-writeoff { display: none !important; }
-  .print-mode-writeoff .print-report { display: none !important; }
-  .print-mode-statement .print-report, .print-mode-statement .print-writeoff { display: none !important; }
-  .print-mode-report .print-statement, .print-mode-writeoff .print-statement { display: none !important; }
+  .print-mode-report .print-writeoff, .print-mode-report .print-prepaid { display: none !important; }
+  .print-mode-writeoff .print-report, .print-mode-writeoff .print-prepaid { display: none !important; }
+  .print-mode-prepaid .print-report, .print-mode-prepaid .print-writeoff { display: none !important; }
+  .print-mode-statement .print-report, .print-mode-statement .print-writeoff, .print-mode-statement .print-prepaid { display: none !important; }
+  .print-mode-report .print-statement, .print-mode-writeoff .print-statement, .print-mode-prepaid .print-statement { display: none !important; }
   .print-mode-writeoff .writeoff-detail { display: block !important; }
   .print-mode-writeoff .writeoff-block .card-head h2 { display: none; }
   .sidebar, .no-print, .profile, .banner, button, .month-input, .card-head .actions { display: none !important; }

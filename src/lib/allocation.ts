@@ -6,7 +6,21 @@ import { AppData, Payment, Unit } from './types';
 
 export { normUnit } from './dues';
 
-export type AllocationSource = 'manual' | 'period' | 'auto';
+/** 期初預收款在銷帳中當成一筆起始月前一天的繳款，id 以此開頭（不在繳費紀錄中）。 */
+export const OPENING_PREFIX = 'opening:';
+export const isOpeningPayment = (id: string) => id.startsWith(OPENING_PREFIX);
+
+/** 期初預收款的虛擬繳款：起始月前一天繳入，依序銷起始月以後的應繳。 */
+export function openingPayment(unit: Unit, startMonth: string): Payment | null {
+  if (!unit.openingPrepaid || unit.openingPrepaid <= 0) return null;
+  return {
+    id: `${OPENING_PREFIX}${unit.id}`, batchId: 'opening', unitNo: unit.unitNo, payerName: '', billPeriod: '', item: '期初預收款',
+    paidDate: startMonth ? monthEnd(addMonths(startMonth, -1)) : '0000-01-01', channel: '期初預收款', amount: unit.openingPrepaid, fee: 0,
+    reportDepositDate: '', depositDate: '', depositConfirmed: true, txnNo: '', status: '', note: '帳務起始月前已預繳', voided: false,
+  };
+}
+
+export type AllocationSource = 'manual' | 'period' | 'offset' | 'auto';
 
 export interface Allocation {
   paymentId: string;
@@ -28,6 +42,14 @@ export interface UnitAccount {
   paidByMonth: Map<string, number>;
   creditByPayment: Map<string, number>;
   credit: number;
+  /** 帳單上的預繳沖銷金額（依月份）：這些月份的應繳指定從預收款扣除。 */
+  offsets: Map<string, number>;
+  /** 實際從預收款扣除的沖銷金額（依月份）。 */
+  offsetUsed: Map<string, number>;
+  /** 依期別銷帳後還沒用掉的款項（預收款，含期初預收款），沖銷就從這裡扣。 */
+  free: { paidDate: string; amount: number }[];
+  /** 銷不完、而且期別還沒有應繳（等帳單匯入）的款項：列為暫收款；其餘銷不完的是多繳，列為預收款。 */
+  pendingCredit: Set<string>;
 }
 
 export interface AllocationResult {
@@ -64,8 +86,9 @@ export function dueFor(acc: UnitAccount, month: string): number {
  * 1. 手動指定的銷帳照指定月份。
  * 2. 有期別的款項先銷期別內有應繳的月份，多出的金額併入第 3 步。
  * 3. 其餘款項依繳費日先後，從最早未繳清的應繳月份往後銷。
- * 4. 負數款項（退款、減收）先沖抵暫收，再從最近已銷的月份往回沖。
- * 銷不完的金額列為暫收，之後月份的應繳建立時會自動銷帳。
+ * 4. 負數款項（退款、減收）先沖抵還沒銷到的款項，再從最近已銷的月份往回沖。
+ * 銷不完的金額：期別的應繳還沒匯入的是暫收款，其餘是多繳、列為預收款；之後月份的應繳建立時會自動銷帳。
+ * 帳單上的預繳沖銷會在依期別之後、依序銷舊欠之前，指定從預收款扣除。
  */
 export function allocateAll(data: AppData): AllocationResult {
   const { settings } = data;
@@ -75,12 +98,14 @@ export function allocateAll(data: AppData): AllocationResult {
     if (unit.deletedAt) continue;
     const key = normUnit(unit.unitNo);
     if (!key || byKey.has(key)) continue;
-    byKey.set(key, { unit, key, dueByMonth: new Map(), billByMonth: new Map(), cycleByBill: new Map(), feePayments: [], allocations: [], paidByMonth: new Map(), creditByPayment: new Map(), credit: 0 });
+    const opening = openingPayment(unit, startMonth);
+    byKey.set(key, { unit, key, dueByMonth: new Map(), billByMonth: new Map(), cycleByBill: new Map(), feePayments: opening ? [opening] : [], allocations: [], paidByMonth: new Map(), creditByPayment: new Map(), credit: 0, offsets: new Map(), offsetUsed: new Map(), free: [], pendingCredit: new Set() });
   }
   for (const d of data.dues) {
     const acc = byKey.get(normUnit(d.unitNo));
     if (!acc || d.month < startMonth) continue;
     acc.dueByMonth.set(d.month, (acc.dueByMonth.get(d.month) ?? 0) + d.amount);
+    if (d.kind === 'prepaid') acc.offsets.set(d.month, (acc.offsets.get(d.month) ?? 0) - (d.billAmount ?? 0));
     if (!d.fromBill) acc.billByMonth.set(d.month, (acc.billByMonth.get(d.month) ?? 0) + (d.billAmount ?? d.amount));
     else if (d.item !== PRIOR_ITEM) {
       const list = acc.cycleByBill.get(d.fromBill) ?? acc.cycleByBill.set(d.fromBill, []).get(d.fromBill)!;
@@ -137,6 +162,21 @@ function allocateUnit(acc: UnitAccount) {
     if (remaining > 0) queue.push({ p, remaining });
   }
 
+  // 帳單上的預繳沖銷：指定從這戶的預收款扣除（只用該月底前繳的款項），優先於依序銷舊欠
+  acc.free = queue.map((q) => ({ paidDate: q.p.paidDate, amount: q.remaining }));
+  for (const [m, offset] of Array.from(acc.offsets).sort((a, b) => a[0].localeCompare(b[0]))) {
+    let need = Math.min(offset, gap(m));
+    for (const q of queue) {
+      if (need <= 0) break;
+      if (q.remaining <= 0 || q.p.paidDate > monthEnd(m)) continue;
+      const a = Math.min(q.remaining, need);
+      add(q.p, m, a, 'offset');
+      acc.offsetUsed.set(m, (acc.offsetUsed.get(m) ?? 0) + a);
+      q.remaining -= a;
+      need -= a;
+    }
+  }
+
   for (const q of queue) {
     for (const m of dueMonths) {
       if (q.remaining <= 0) break;
@@ -166,6 +206,13 @@ function allocateUnit(acc: UnitAccount) {
 
   acc.allocations.sort((a, b) => a.month.localeCompare(b.month));
   acc.credit = Array.from(acc.creditByPayment.values()).reduce((s, v) => s + v, 0);
+  for (const [id, v] of acc.creditByPayment) {
+    const p = payments.find((x) => x.id === id);
+    if (v > 0 && p && !isOpeningPayment(id)) {
+      const periods = parsePeriods(p.billPeriod);
+      if ((periods.length ? periods : [monthOf(p.paidDate)]).some((m) => !acc.dueByMonth.has(m))) acc.pendingCredit.add(id);
+    }
+  }
 }
 
 export interface UnitSummary {
@@ -198,8 +245,9 @@ export function summarizeUnit(acc: UnitAccount, from: string, to: string): UnitS
   }
   const end = monthEnd(to);
   const prepaid = acc.allocations.filter((a) => a.month > to).reduce((s, a) => s + a.amount, 0) + acc.credit;
-  const received = acc.feePayments.filter((p) => p.paidDate >= `${from}-01` && p.paidDate <= end).reduce((s, p) => s + p.amount, 0);
-  const lastPaidDate = acc.feePayments.reduce((m, p) => (p.amount > 0 && p.paidDate > m ? p.paidDate : m), '');
+  const real = acc.feePayments.filter((p) => !isOpeningPayment(p.id));
+  const received = real.filter((p) => p.paidDate >= `${from}-01` && p.paidDate <= end).reduce((s, p) => s + p.amount, 0);
+  const lastPaidDate = real.reduce((m, p) => (p.amount > 0 && p.paidDate > m ? p.paidDate : m), '');
   let paidThrough = '';
   for (const m of Array.from(acc.dueByMonth.keys()).sort()) {
     if ((acc.paidByMonth.get(m) ?? 0) < dueFor(acc, m)) break;
@@ -209,20 +257,37 @@ export function summarizeUnit(acc: UnitAccount, from: string, to: string): UnitS
 }
 
 export interface AdvanceBalances {
-  /** 預收款：截至月底已繳、銷帳月份在該月之後的金額。 */
+  /** 預收款：截至月底已繳、銷帳月份在該月之後，或多繳還沒銷到的金額（含期初預收款）。 */
   prepaid: number;
-  /** 暫收款：截至月底已繳，但還沒有應繳可以銷帳（未建立帳單或多繳）的金額。 */
+  /** 暫收款：截至月底已繳，但期別的每月應繳還沒匯入、尚無應繳可以銷帳的金額。 */
   suspense: number;
 }
 
-export function advancesFromAllocations(result: AllocationResult, payments: Payment[], month: string): AdvanceBalances {
+/** 單戶在某月底的預收款與暫收款；skip 的款項（例如撥款尚未核對）不計。 */
+export function unitAdvances(acc: UnitAccount, month: string, skip: Set<string> = new Set()): AdvanceBalances {
   const end = monthEnd(month);
-  const paidBy = new Map(payments.map((p) => [p.id, p.paidDate]));
+  const paidBy = new Map(acc.feePayments.map((p) => [p.id, p.paidDate]));
+  const counted = (id: string) => !skip.has(id) && (paidBy.get(id) ?? '') <= end;
+  let prepaid = 0;
+  let suspense = 0;
+  for (const a of acc.allocations) if (a.month > month && counted(a.paymentId)) prepaid += a.amount;
+  // 多繳、期初預收款還沒銷到的部分是預收款；期別還沒有應繳（等帳單匯入）的才是暫收款
+  for (const [id, v] of acc.creditByPayment) {
+    if (!counted(id)) continue;
+    if (acc.pendingCredit.has(id)) suspense += v;
+    else prepaid += v;
+  }
+  return { prepaid, suspense };
+}
+
+export function advancesFromAllocations(result: AllocationResult, payments: Payment[], month: string, opts: { confirmedOnly?: boolean } = {}): AdvanceBalances {
+  const skip = new Set(opts.confirmedOnly ? payments.filter((p) => !p.depositConfirmed).map((p) => p.id) : []);
   let prepaid = 0;
   let suspense = 0;
   for (const acc of result.accounts) {
-    for (const a of acc.allocations) if (a.month > month && (paidBy.get(a.paymentId) ?? '') <= end) prepaid += a.amount;
-    for (const [id, v] of acc.creditByPayment) if ((paidBy.get(id) ?? '') <= end) suspense += v;
+    const a = unitAdvances(acc, month, skip);
+    prepaid += a.prepaid;
+    suspense += a.suspense;
   }
   return { prepaid: Math.round(prepaid), suspense: Math.round(suspense) };
 }
@@ -248,7 +313,7 @@ export interface ReceiptBreakdown {
 
 /**
  * 期間內收到的管理費（全額列入當期收入），依銷帳月份拆成：
- * 當期銷帳、預收（銷以後月份）、補繳（銷以前月份）、暫收（尚無應繳可銷帳）、未對應戶別。
+ * 當期銷帳、預收（銷以後月份或多繳）、補繳（銷以前月份）、暫收（期別的應繳還沒匯入）、未對應戶別。
  */
 export function receiptBreakdown(
   result: AllocationResult,
@@ -291,7 +356,9 @@ export function receiptBreakdownBy(
       else if (a.month > endMonth) out.prepaid += a.amount;
       else out.current += a.amount;
     }
-    out.credit += acc.creditByPayment.get(p.id) ?? 0;
+    const credit = acc.creditByPayment.get(p.id) ?? 0;
+    if (acc.pendingCredit.has(p.id)) out.credit += credit;
+    else out.prepaid += credit;
   }
   return groups;
 }
@@ -404,11 +471,60 @@ export function findAmountMismatches(data: AppData, paymentIds: Set<string>): Am
   return out.sort((a, b) => a.account.unit.unitNo.localeCompare(b.account.unit.unitNo, 'zh-Hant', { numeric: true }));
 }
 
+export interface PrepaidRow {
+  unitNo: string;
+  owner: string;
+  /** 上月底預收款。 */
+  opening: number;
+  /** 本月新增：本月繳費中預繳以後月份或多繳的部分。 */
+  added: number;
+  /** 本月沖銷：以前繳的預收款銷到本月的金額。 */
+  used: number;
+  closing: number;
+}
+
+export interface PrepaidUse {
+  unitNo: string;
+  owner: string;
+  payment: Payment;
+  source: AllocationSource;
+  amount: number;
+}
+
+/** 某月份的預收款增減（逐戶）與本月沖銷明細：上月底＋本月新增－本月沖銷＝月底。 */
+export function prepaidLedger(result: AllocationResult, month: string): { rows: PrepaidRow[]; uses: PrepaidUse[] } {
+  const start = `${month}-01`;
+  const end = monthEnd(month);
+  const prev = addMonths(month, -1);
+  const rows: PrepaidRow[] = [];
+  const uses: PrepaidUse[] = [];
+  for (const acc of result.accounts) {
+    const owner = ownerAt(acc.unit, month);
+    const byId = new Map(acc.feePayments.map((p) => [p.id, p]));
+    const opening = unitAdvances(acc, prev).prepaid;
+    const closing = unitAdvances(acc, month).prepaid;
+    let added = 0;
+    for (const p of acc.feePayments) {
+      if (p.paidDate < start || p.paidDate > end) continue;
+      added += acc.allocations.filter((a) => a.paymentId === p.id && a.month > month).reduce((t, a) => t + a.amount, 0);
+      if (!acc.pendingCredit.has(p.id)) added += acc.creditByPayment.get(p.id) ?? 0;
+    }
+    for (const a of acc.allocations) {
+      const p = byId.get(a.paymentId);
+      if (a.month === month && p && p.paidDate < start) uses.push({ unitNo: acc.unit.unitNo, owner, payment: p, source: a.source, amount: a.amount });
+    }
+    if (opening || added || closing) rows.push({ unitNo: acc.unit.unitNo, owner, opening, added, used: opening + added - closing, closing });
+  }
+  return { rows, uses };
+}
+
 export interface PaidLine {
   payment: Payment;
   owner: string;
   allocations: Allocation[];
   credit: number;
+  /** 銷不完的部分是暫收款（應繳還沒匯入）；否則是多繳，列為預收款。 */
+  pending: boolean;
 }
 
 /** 某月份的繳費紀錄（已繳清單）：每筆繳費與它銷到哪些月份。 */
@@ -417,7 +533,7 @@ export function paidListForMonth(result: AllocationResult, payments: Payment[], 
     .filter((p) => !p.voided && p.paidDate.startsWith(month))
     .map((p) => {
       const acc = result.byKey.get(normUnit(p.unitNo));
-      return { payment: p, owner: (acc && ownerAt(acc.unit, month)) || p.payerName, allocations: result.byPayment.get(p.id) ?? [], credit: acc?.creditByPayment.get(p.id) ?? 0 };
+      return { payment: p, owner: (acc && ownerAt(acc.unit, month)) || p.payerName, allocations: result.byPayment.get(p.id) ?? [], credit: acc?.creditByPayment.get(p.id) ?? 0, pending: !acc || acc.pendingCredit.has(p.id) };
     })
     .sort((a, b) => a.payment.unitNo.localeCompare(b.payment.unitNo, 'zh-Hant', { numeric: true }) || a.payment.paidDate.localeCompare(b.payment.paidDate));
 }

@@ -187,3 +187,25 @@ describe('write-off print lists', () => {
     ]);
   });
 });
+
+describe('opening prepaid and unreconciled payments', () => {
+  it('writes off months from the opening prepaid and keeps the rest as 預收款', () => {
+    const d = setup([], [], ['2026-10', '2026-11']);
+    d.settings.billingStartMonth = '2026-10';
+    d.settings.units[0].openingPrepaid = 6000;
+    const r = allocateAll(d);
+    const acc = r.byKey.get('A1-3F')!;
+    expect([acc.paidByMonth.get('2026-10'), acc.paidByMonth.get('2026-11'), acc.credit]).toEqual([2000, 2000, 2000]);
+    expect(advancesFromAllocations(r, d.payments, '2026-11')).toEqual({ prepaid: 2000, suspense: 0 });
+    expect(summarizeUnit(acc, '2026-10', '2026-11').received).toBe(0);
+  });
+
+  it('leaves payments not yet reconciled out of 預收款 and 暫收款 when asked', () => {
+    const d = setup([pay('A1-3F', '2026-10-05', 6000, '115/10~115/12')], [], ['2026-10', '2026-11', '2026-12']);
+    const r = allocateAll(d);
+    expect(advancesFromAllocations(r, d.payments, '2026-10').prepaid).toBe(4000);
+    expect(advancesFromAllocations(r, d.payments, '2026-10', { confirmedOnly: true }).prepaid).toBe(0);
+    d.payments[0].depositConfirmed = true;
+    expect(advancesFromAllocations(allocateAll(d), d.payments, '2026-10', { confirmedOnly: true }).prepaid).toBe(4000);
+  });
+});

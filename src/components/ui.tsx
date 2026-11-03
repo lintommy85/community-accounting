@@ -19,9 +19,9 @@ export function Section({ title, actions, children, className }: { title: string
   );
 }
 
-export function Stat({ label, value, hint, tone, onClick }: { label: string; value: number; hint?: string; tone?: 'warn' | 'ok'; onClick?: () => void }) {
+export function Stat({ label, value, hint, tone, onClick, title }: { label: string; value: number; hint?: string; tone?: 'warn' | 'ok'; onClick?: () => void; title?: string }) {
   return (
-    <div className={`stat ${tone ?? ''}${onClick ? ' clickable' : ''}`} onClick={onClick} role={onClick ? 'button' : undefined} title={onClick ? '查看帳戶變動紀錄' : undefined}>
+    <div className={`stat ${tone ?? ''}${onClick ? ' clickable' : ''}`} onClick={onClick} role={onClick ? 'button' : undefined} title={onClick ? title ?? '查看帳戶變動紀錄' : undefined}>
       <div className="stat-label">{label}</div>
       <div className="stat-value">{formatMoney(value)}</div>
       {hint && <div className="stat-hint">{hint}</div>}

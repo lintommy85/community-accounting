@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import FirstSetupGuide from '../components/FirstSetupGuide';
 import { Go, useNavArg } from '../components/nav';
+import OpeningPrepaid from '../components/OpeningPrepaid';
 import OwnerHistory from '../components/OwnerHistory';
 import MonthDues from '../components/MonthDues';
 import { useSelection } from '../components/useSelection';
@@ -13,7 +14,7 @@ import { ownerHistory, ownerMatches } from '../lib/owners';
 import { FeePlan, Settings, Unit } from '../lib/types';
 import { useStore } from '../store';
 
-type Tab = 'units' | 'dues';
+type Tab = 'units' | 'dues' | 'prepaid';
 const CUSTOM = '__custom';
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 
@@ -21,7 +22,8 @@ export default function UnitsPage({ go }: { go: Go }) {
   const { data, update } = useStore();
   const s = data.settings;
   const live = activeUnits(s.units);
-  const [tab, setTab] = useState<Tab>(useNavArg() === 'units' ? 'units' : 'dues');
+  const navArg = useNavArg();
+  const [tab, setTab] = useState<Tab>(navArg === 'units' || navArg === 'prepaid' ? navArg : 'dues');
   const [ownerUnit, setOwnerUnit] = useState<Unit | null>(null);
   const [q, setQ] = useState('');
   const [planFilter, setPlanFilter] = useState('');
@@ -122,6 +124,7 @@ export default function UnitsPage({ go }: { go: Go }) {
         <div className="actions">
           <button className={tab === 'dues' ? 'primary' : ''} onClick={() => setTab('dues')}>每月應繳</button>
           <button className={tab === 'units' ? 'primary' : ''} onClick={() => setTab('units')}>基準與費率</button>
+          <button className={tab === 'prepaid' ? 'primary' : ''} onClick={() => setTab('prepaid')}>期初預收款</button>
           <button onClick={() => go('import', 'dues')}>匯入每月應繳報表 →</button>
         </div>
       </div>
@@ -136,6 +139,8 @@ export default function UnitsPage({ go }: { go: Go }) {
       {(live.length === 0 || !data.dues.length) && <FirstSetupGuide go={go} here={tab === 'units' ? 'units' : undefined} />}
       {tab === 'dues' ? (
         live.length > 0 && <MonthDues go={go} />
+      ) : tab === 'prepaid' ? (
+        live.length > 0 && <OpeningPrepaid />
       ) : (
         <>
           <PlanEditor
@@ -200,7 +205,7 @@ export default function UnitsPage({ go }: { go: Go }) {
                 <thead>
                   <tr>
                     <th><input type="checkbox" aria-label="勾選全部" checked={shown.length > 0 && selectedShown === shown.length} onChange={(e) => selectShown(e.target.checked)} /></th>
-                    <th>戶別</th><th>所有權人</th><th className="num">坪數</th><th>費率方案</th><th className="num">方案金額</th><th>加收</th><th>繳費週期</th><th className="num">每月基準</th><th>備註</th>
+                    <th>戶別</th><th>所有權人</th><th>坪數</th><th>費率方案</th><th className="num">方案金額</th><th>加收</th><th>繳費週期</th><th className="num">每月基準</th><th>備註</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -393,7 +398,7 @@ function BillItemMapEditor() {
                     {!items.includes(target) && target !== BILL_ARREARS && target !== BILL_ASIS && target !== BILL_PREPAID && <option value={target}>{target}（已不存在）</option>}
                     {items.map((f) => <option key={f} value={f}>繳費項目：{f}</option>)}
                     <option value={BILL_ARREARS}>逾期（帳單內含，不列應繳）</option>
-                    <option value={BILL_PREPAID}>預繳沖銷（由預收款銷帳）</option>
+                    <option value={BILL_PREPAID}>沖銷（從這戶的預收款扣除）</option>
                     <option value={BILL_ASIS}>照帳單（減免等，不比對基準）</option>
                   </select>
                 </td>

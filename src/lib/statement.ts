@@ -84,9 +84,9 @@ function order(labels: Set<string>, preferred: string[]): string[] {
 /** 依期間欄位（例如本月／本年累計，或 1–12 月＋全年）彙總收入與支出科目。 */
 export const BREAKDOWN_LABELS = {
   current: '　其中：當期銷帳',
-  prepaid: '　其中：預收（銷以後月份）',
+  prepaid: '　其中：預收（預繳、多繳）',
   arrears: '　其中：補繳以前月份',
-  credit: '　其中：暫收（尚無應繳可銷帳）',
+  credit: '　其中：暫收（期別的每月應繳還沒匯入）',
   unmatched: '　其中：未對應門牌',
 } as const;
 

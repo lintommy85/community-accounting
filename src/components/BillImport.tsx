@@ -36,8 +36,9 @@ function splitNote(sp: BillSplit): string {
   if (sp.flags.includes('prior')) notes.push(`帳單內含逾期 ${fmt(sp.carried)}，系統欠款 ${fmt(sp.arrears)}，多出 ${fmt(sp.prior)} 記為前期欠款`);
   if (sp.flags.includes('lessArrears')) notes.push(`系統欠款 ${fmt(sp.arrears)} 比帳單內含逾期 ${fmt(sp.carried)} 多，可能有繳費還沒匯入`);
   if (!notes.length && sp.carried) notes.push(`帳單內含逾期 ${fmt(sp.carried)}，與系統欠款相符`);
-  if (sp.prepaid) notes.push(`預繳沖銷 ${fmt(sp.prepaid)} 由系統預收款銷帳`);
-  if (sp.prepaidBefore) notes.push(`預繳沖銷 ${fmt(sp.prepaidBefore)} 系統沒有預收款（可能是啟用前預繳），照帳單減少應繳`);
+  if (sp.prepaid) notes.push(`沖銷 ${fmt(sp.prepaid)} 從這戶的預收款扣除（預收款 ${fmt(sp.prepaidBalance)} → ${fmt(sp.prepaidBalance - sp.prepaid)}）`);
+  if (sp.autoPrepaid) notes.push(`這戶有預收款，本期應繳 ${fmt(sp.autoPrepaid)} 會自動從預收款銷帳，等同沖銷（預收款 ${fmt(sp.autoBalance)} → ${fmt(sp.autoBalance - sp.autoPrepaid)}）`);
+  if (sp.prepaidBefore) notes.push(`沖銷 ${fmt(sp.prepaidBefore)} 超過這戶的預收款（只有 ${fmt(sp.prepaidBalance)}），不足的部分照帳單減少應繳（啟用前已預繳的請到「戶別與月費 → 期初預收款」輸入後重新匯入）`);
   return notes.join('；');
 }
 
@@ -233,7 +234,7 @@ export default function BillImport({ go }: { go?: Go }) {
   }
 
   const targetLabel = (t: string) =>
-    t === BILL_ARREARS ? '逾期（帳單內含，不列應繳）' : t === BILL_PREPAID ? '預繳沖銷（由預收款銷帳）' : t === BILL_ASIS ? '照帳單（減免等，不比對基準）' : `繳費項目：${t}`;
+    t === BILL_ARREARS ? '逾期（帳單內含，不列應繳）' : t === BILL_PREPAID ? '沖銷（從這戶的預收款扣除）' : t === BILL_ASIS ? '照帳單（減免等，不比對基準）' : `繳費項目：${t}`;
 
   return (
     <>
@@ -245,7 +246,7 @@ export default function BillImport({ go }: { go?: Go }) {
         匯入前會檢查：① 每個帳單項目都要對應到「基準與費率」的繳費項目（或標記為逾期、照帳單），對應不起來就不能匯入；
         ② 逐戶逐項和基準比對，金額不同的要選擇「更新基準」或「不更新」，全部選完才能匯入。
         逾期項目（例如「10月未繳管理費」）不會再列為應繳，先對應系統既有的欠款，系統沒有的記為上個月的「前期欠款」。
-        預繳沖銷（例如「年繳沖銷」）不減少應繳，由系統已收的預繳款銷帳；系統沒有這戶的預繳款時才照帳單減少應繳。
+        帳單上的沖銷項目（例如「年繳沖銷」「預繳沖銷」，各社區名稱可能不同，第一次匯入時對應到「沖銷」）不減少應繳，而是從這戶的預收款扣除（住戶年繳、預繳、溢繳的款項，含「期初預收款」）；預收款不夠時，不足的部分才照帳單減少應繳。
       </p>
       {firstTime && !table && <FirstSetupGuide go={go} here="import" />}
       <label className="drop">
@@ -395,15 +396,17 @@ export default function BillImport({ go }: { go?: Go }) {
               <strong>有 {plan.unmapped.length} 個帳單項目還沒對應到基準費率，不能匯入。</strong>
               <span>
                 請選擇每個項目對應到哪個繳費項目。如果是新的收費（例如新的清潔費），請先到「戶別與月費 → 基準與費率」新增方案（方案名稱就是繳費項目），再回來選擇。
+                住戶年繳、預繳或溢繳後，帳單上用來扣抵的負數項目（不論叫「年繳沖銷」「預繳扣抵」或其他名稱）請選「沖銷（從這戶的預收款扣除）」。
                 對應會記住，之後匯入自動套用。
               </span>
               <table className="compact-inputs">
-                <thead><tr><th>帳單項目</th><th className="num">筆數</th><th>對應到</th></tr></thead>
+                <thead><tr><th>帳單項目</th><th className="num">筆數</th><th className="num">合計金額</th><th>對應到</th></tr></thead>
                 <tbody>
                   {plan.unmapped.map((name) => (
                     <tr key={name}>
                       <td>{name}</td>
                       <td className="num">{billRows.filter((r) => billItemName(r.item) === name).length}</td>
+                      <td className="num"><Money value={billRows.filter((r) => billItemName(r.item) === name).reduce((t, r) => t + r.amount, 0)} /></td>
                       <td>
                         <select value={pickOf(name)} onChange={(e) => setPicks({ ...picks, [name]: e.target.value })}>
                           <option value="">— 請選擇 —</option>
@@ -429,12 +432,25 @@ export default function BillImport({ go }: { go?: Go }) {
           {!firstTime && plan && !plan.unmapped.length && parsed && (
             <>
               <ul className="summary">
+                {plan.splits.some((sp) => sp.prepaid || sp.autoPrepaid) && (
+                  <li>
+                    從預收款扣除：{plan.splits.filter((sp) => sp.prepaid || sp.autoPrepaid).length} 戶共 <Money value={plan.splits.reduce((t, sp) => t + sp.prepaid + sp.autoPrepaid, 0)} /> 元
+                    （帳單沖銷 <Money value={plan.splits.reduce((t, sp) => t + sp.prepaid, 0)} /> 元、多繳／預繳自動銷帳 <Money value={plan.splits.reduce((t, sp) => t + sp.autoPrepaid, 0)} /> 元，說明欄有扣除前後的預收款）
+                  </li>
+                )}
                 <li>帳單 {plan.splits.length ? `${plan.splits.length} 筆（帳單月份：${months.join('、')}）` : '：目前沒有填任何應繳金額'}</li>
                 {newStart && <li className="warn">帳務起始月目前是 {startSet}，有更早的帳單（{newStart}），匯入後起始月會改為 {newStart}（否則這些月份不會銷帳）</li>}
                 {changes.length > 0 && <li><strong>應繳新增 {count('new')} 筆、變動 {count('changed')} 筆{count('removed') ? `、刪除 ${count('removed')} 筆` : ''}</strong>、未變動 {count('same')} 筆（略過）</li>}
                 {groups.some((g) => g.sp.carried) && <li>帳單內含逾期：{groups.filter((g) => g.sp.carried).length} 戶，共 <Money value={groups.reduce((t, g) => t + g.sp.carried, 0)} /> 元（不重複列為應繳）{flagged('prior').length ? `，其中 ${flagged('prior').length} 戶有系統沒有的欠款，記為前期欠款` : ''}</li>}
                 {flagged('below').length > 0 && <li className="warn">{flagged('below').length} 戶帳單低於基準，本期應繳仍以基準計：{flagged('below').slice(0, 6).map((sp) => sp.unitNo).join('、')}{flagged('below').length > 6 ? '…' : ''}</li>}
                 {flagged('lessArrears').length > 0 && <li className="warn">{flagged('lessArrears').length} 戶系統欠款比帳單內含的逾期多，可能有繳費還沒匯入：{flagged('lessArrears').slice(0, 6).map((sp) => sp.unitNo).join('、')}{flagged('lessArrears').length > 6 ? '…' : ''}</li>}
+                {plan.splits.some((sp) => sp.prepaidBefore) && (
+                  <li className="warn">
+                    {plan.splits.filter((sp) => sp.prepaidBefore).length} 戶帳單的沖銷超過這戶的預收款，不足的部分這次照帳單減少應繳：
+                    {plan.splits.filter((sp) => sp.prepaidBefore).slice(0, 6).map((sp) => sp.unitNo).join('、')}{plan.splits.filter((sp) => sp.prepaidBefore).length > 6 ? '…' : ''}。
+                    啟用本系統前已預繳的，請先到「戶別與月費 → 期初預收款」輸入每戶還剩多少預收款再匯入，沖銷就會由預收款銷帳。
+                  </li>
+                )}
                 {flagged('offCycle').length > 0 && <li className="err">{flagged('offCycle').length} 戶這個月不是繳費週期的第一個月，不會匯入，請確認「基準與費率」的繳費週期：{flagged('offCycle').slice(0, 6).map((sp) => sp.unitNo).join('、')}{flagged('offCycle').length > 6 ? '…' : ''}</li>}
                 {flagged('noBase').length > 0 && <li className="warn">{flagged('noBase').length} 戶是新戶別，這次只建立戶別、不匯入應繳（到「基準與費率」設定基準後再匯入一次）</li>}
                 {parsed.issues.length > 0 && (

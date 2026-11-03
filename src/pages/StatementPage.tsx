@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import FinanceSheet from '../components/FinanceSheet';
 import IncomeExpenseTable from '../components/IncomeExpenseTable';
+import PrepaidSheet from '../components/PrepaidSheet';
 import Signatures from '../components/Signatures';
 import WriteOffSheet from '../components/WriteOffSheet';
 import { useNavArg } from '../components/nav';
 import { lastMonth, Money, MonthInput, Section } from '../components/ui';
+import { allocateAll, prepaidLedger } from '../lib/allocation';
 import { monthEnd } from '../lib/dates';
 import { withCommunity } from '../lib/defaults';
 import { monthReport } from '../lib/ledger';
@@ -14,7 +16,7 @@ import { exportStatement } from '../lib/xlsxio';
 import { useStore } from '../store';
 
 type Mode = 'month' | 'year';
-type PrintMode = 'statement' | 'report' | 'writeoff';
+type PrintMode = 'statement' | 'report' | 'writeoff' | 'prepaid';
 
 export default function StatementPage() {
   const { data } = useStore();
@@ -26,6 +28,9 @@ export default function StatementPage() {
   const [fund, setFund] = useState<FundFilter>('');
   const [printMode, setPrintMode] = useState<PrintMode>('statement');
   const [showDetail, setShowDetail] = useState(false);
+  const [showPrepaid, setShowPrepaid] = useState(false);
+  const hasUnits = data.settings.units.some((u) => !u.deletedAt);
+  const prepaid = useMemo(() => (mode === 'month' && hasUnits ? prepaidLedger(allocateAll(data), month) : null), [data, mode, month, hasUnits]);
 
   const periods = mode === 'month' ? monthPeriods(month) : yearPeriods(year);
   const st = buildStatement(data, periods, { basis, fund });
@@ -91,6 +96,7 @@ export default function StatementPage() {
             <button className="primary" onClick={() => print('statement')}>列印年報</button>
           )}
           {r?.writeOff && <button onClick={() => print('writeoff')}>列印管理費銷帳</button>}
+          {prepaid && <button onClick={() => print('prepaid')}>列印預收款項銷帳紀錄</button>}
         </div>
       </div>
 
@@ -134,7 +140,7 @@ export default function StatementPage() {
             {pos.inTransit !== 0 && <tr><th>在途存款</th><td></td><td></td><td></td><td className="num"><Money value={pos.inTransit} /></td></tr>}
             <tr className="total"><th>資金合計</th><td></td><td></td><td></td><td className="num"><Money value={pos.balances.reduce((s, b) => s + b.closing, 0) + pos.inTransit} strong /></td></tr>
             {pos.prepaid !== 0 && <tr className="sub-line"><th>其中：預收管理費</th><td></td><td></td><td></td><td className="num"><Money value={pos.prepaid} /></td></tr>}
-            {pos.suspense !== 0 && <tr className="sub-line"><th>其中：暫收款（尚無應繳可銷帳）</th><td></td><td></td><td></td><td className="num"><Money value={pos.suspense} /></td></tr>}
+            {pos.suspense !== 0 && <tr className="sub-line"><th>其中：暫收款（期別的每月應繳還沒匯入）</th><td></td><td></td><td></td><td className="num"><Money value={pos.suspense} /></td></tr>}
           </tbody>
         </table>
         <Signatures />
@@ -162,6 +168,29 @@ export default function StatementPage() {
           </Section>
           <div className="print-only print-writeoff">
             <WriteOffSheet data={data} month={month} report={r} printOnly />
+          </div>
+        </>
+      )}
+      {prepaid && (
+        <>
+          <Section
+            title={`${month} 預收款項`}
+            className="no-print"
+            actions={<button onClick={() => setShowPrepaid(!showPrepaid)}>{showPrepaid ? '隱藏明細' : `顯示 ${prepaid.rows.length} 戶／沖銷 ${prepaid.uses.length} 筆`}</button>}
+          >
+            <table className="report">
+              <tbody>
+                <tr><th>上月底預收款</th><td className="num"><Money value={prepaid.rows.reduce((t, x) => t + x.opening, 0)} /></td></tr>
+                <tr><th>＋ 本月新增（預繳、多繳）</th><td className="num"><Money value={prepaid.rows.reduce((t, x) => t + x.added, 0)} /></td></tr>
+                <tr><th>－ 本月沖銷</th><td className="num"><Money value={prepaid.rows.reduce((t, x) => t + x.used, 0)} /></td></tr>
+                <tr className="total"><th>＝ 月底預收款（{prepaid.rows.filter((x) => x.closing).length} 戶）</th><td className="num"><Money value={prepaid.rows.reduce((t, x) => t + x.closing, 0)} strong /></td></tr>
+              </tbody>
+            </table>
+            {showPrepaid && <PrepaidSheet data={data} month={month} rows={prepaid.rows} uses={prepaid.uses} />}
+            <p className="hint">「列印預收款項銷帳紀錄」會印出逐戶的預收款增減（上月底＋本月新增－本月沖銷＝月底），以及本月由預收款沖銷的明細（帳單沖銷、依期別、自動銷帳）。</p>
+          </Section>
+          <div className="print-only print-prepaid">
+            <PrepaidSheet data={data} month={month} rows={prepaid.rows} uses={prepaid.uses} printOnly />
           </div>
         </>
       )}

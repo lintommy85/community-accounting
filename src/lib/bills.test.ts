@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allocateAll, findAmountMismatches } from './allocation';
+import { advancesFromAllocations, allocateAll, findAmountMismatches, prepaidLedger } from './allocation';
 import { applyBaselineUpdates, ARREARS_ITEM, BILL_ARREARS, BILL_ASIS, BILL_PREPAID, billItemName, DiffDecision, planBillImport, suggestBillItem } from './bills';
 import { emptyData } from './defaults';
 import { applyDueChanges, diffDues, DueRow } from './dues';
@@ -39,6 +39,7 @@ describe('bill item mapping', () => {
     expect(suggestBillItem('未繳管理費', ['管理費'])).toBe(BILL_ARREARS);
     expect(suggestBillItem('年繳沖銷', ['管理費'])).toBe(BILL_PREPAID);
     expect(suggestBillItem('委員減免', ['管理費'])).toBe(BILL_ASIS);
+    expect(suggestBillItem('預繳扣抵', ['管理費'])).toBe(BILL_PREPAID);
     expect(suggestBillItem('腳踏車清潔費', ['管理費', '腳踏車位清潔費'])).toBe('腳踏車位清潔費');
     expect(suggestBillItem('坪數費', ['管理費'])).toBe('');
   });
@@ -139,6 +140,74 @@ describe('splitting 智生活 bills against the baseline', () => {
     const r = importBills(none, [bill('B', 2000), bill('B', 500, '11月汽車位清潔費'), bill('B', -2500, '年繳沖銷')]);
     expect(r.plan.splits[0]).toMatchObject({ prepaid: 0, prepaidBefore: 2500 });
     expect(r.dues.filter((x) => x.unitNo === 'B' && x.month === '2026-11').reduce((t, x) => t + x.amount, 0)).toBe(0);
+  });
+
+  it('pays 年繳沖銷 from the opening prepaid entered for households that prepaid before the system started', () => {
+    const d = setup();
+    d.settings.billingStartMonth = '2026-11';
+    d.settings.billItemMap = { 年繳沖銷: BILL_PREPAID };
+    d.dues = [];
+    d.payments = [];
+    d.settings.units[1].openingPrepaid = 2500 * 8;
+    const { plan, dues } = importBills(d, [bill('B', 2000), bill('B', 500, '11月汽車位清潔費'), bill('B', -2500, '年繳沖銷')]);
+    expect(plan.splits[0]).toMatchObject({ bill: 0, base: 2500, carried: 0, prior: 0, prepaid: 2500, prepaidBefore: 0 });
+    d.dues = dues;
+    const acc = allocateAll(d).byKey.get('B')!;
+    expect([acc.dueByMonth.get('2026-11'), acc.paidByMonth.get('2026-11'), acc.credit]).toEqual([2500, 2500, 17500]);
+    expect(advancesFromAllocations(allocateAll(d), d.payments, '2026-11')).toEqual({ prepaid: 17500, suspense: 0 });
+  });
+
+  it('takes 沖銷 out of the household’s prepaid even when an older month is still unpaid', () => {
+    const d = setup();
+    d.settings.billItemMap = { 年繳沖銷: BILL_PREPAID };
+    // A 戶 10 月沒繳；10 月另外溢繳 6000（沒有期別）
+    d.payments = [pay('x', 'A', '2026-10-20', 6000)];
+    const before = allocateAll(d).byKey.get('A')!;
+    expect([before.paidByMonth.get('2026-10'), before.credit]).toEqual([2000, 4000]);
+    const { plan, dues } = importBills(d, [bill('A', 2000), bill('A', -2000, '年繳沖銷')]);
+    expect(plan.splits[0]).toMatchObject({ prepaid: 2000, prepaidBalance: 6000, prepaidBefore: 0 });
+    d.dues = dues;
+    const acc = allocateAll(d).byKey.get('A')!;
+    expect(acc.allocations.filter((a) => a.source === 'offset').map((a) => [a.month, a.amount])).toEqual([['2026-11', 2000]]);
+    expect([acc.paidByMonth.get('2026-10'), acc.paidByMonth.get('2026-11'), acc.credit]).toEqual([2000, 2000, 2000]);
+  });
+
+  it('counts an overpayment as prepaid and uses it for next month’s bill like a 沖銷', () => {
+    const d = setup();
+    // B 戶 10 月已繳；10 月 25 日又多繳 3000（沒有欠繳）
+    d.payments.push(pay('o', 'B', '2026-10-25', 3000, '115/10'));
+    expect(advancesFromAllocations(allocateAll(d), d.payments, '2026-10')).toEqual({ prepaid: 3000, suspense: 0 });
+    const { plan, dues } = importBills(d, [bill('B', 2000), bill('B', 500, '11月汽車位清潔費')]);
+    expect(plan.splits[0]).toMatchObject({ base: 2500, autoPrepaid: 2500, autoBalance: 3000 });
+    d.dues = dues;
+    const r = allocateAll(d);
+    expect(r.byKey.get('B')!.paidByMonth.get('2026-11')).toBe(2500);
+    expect(advancesFromAllocations(r, d.payments, '2026-11')).toEqual({ prepaid: 500, suspense: 0 });
+    const { rows, uses } = prepaidLedger(r, '2026-11');
+    expect(rows.find((x) => x.unitNo === 'B')).toMatchObject({ opening: 3000, added: 0, used: 2500, closing: 500 });
+    expect(uses.map((u) => [u.unitNo, u.payment.id, u.amount])).toEqual([['B', 'o', 2500]]);
+  });
+
+  it('keeps a payment as 暫收 while the bill for its period is not imported yet', () => {
+    const d = setup();
+    d.payments.push(pay('n', 'B', '2026-10-28', 2500, '115/11'));
+    expect(advancesFromAllocations(allocateAll(d), d.payments, '2026-10')).toEqual({ prepaid: 0, suspense: 2500 });
+    const { plan } = importBills(d, [bill('B', 2000), bill('B', 500, '11月汽車位清潔費')]);
+    expect(plan.splits[0].autoPrepaid).toBe(0);
+  });
+
+  it('never treats a bill that 沖銷 brings to 0 as arrears, even without a baseline', () => {
+    const d = setup();
+    d.settings.billItemMap = { 年繳沖銷: BILL_PREPAID };
+    d.settings.units[0].monthlyFee = 0;
+    d.dues = [];
+    d.payments = [];
+    const rows = [bill('A', 2676), bill('A', -2676, '年繳沖銷')];
+    const keep = new Map<string, DiffDecision>([['A|2026-11|管理費', 'keep']]);
+    const { plan, dues } = importBills(d, rows, keep);
+    expect(plan.splits[0]).toMatchObject({ bill: 0, carried: 0, prior: 0 });
+    expect(dues.filter((x) => x.unitNo === 'A').reduce((t, x) => t + x.amount, 0)).toBe(0);
+    expect(dues.some((x) => x.item === '前期欠款')).toBe(false);
   });
 
   it('keeps the baseline used when a month was imported; later rate changes only affect new months', () => {

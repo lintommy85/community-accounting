@@ -173,7 +173,7 @@ export default function ImportReview({
         </div>
         <p className={over ? 'err' : 'hint'}>
           已分配 {formatMoney(total)}／繳款 {formatMoney(p.amount)}
-          {over ? '超過繳款金額' : p.amount - total ? `未分配 ${formatMoney(p.amount - total)} 元列為暫收款，之後有應繳時自動銷帳` : '全額銷帳'}
+          {over ? '超過繳款金額' : p.amount - total ? `未分配 ${formatMoney(p.amount - total)} 元列為這戶的預收款（期別應繳還沒匯入時為暫收款），之後有應繳時自動銷帳` : '全額銷帳'}
           {draft.mode === 'auto' ? '（系統自動）' : '（手動指定）'}
         </p>
         <label>

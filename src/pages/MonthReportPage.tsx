@@ -94,7 +94,7 @@ export default function MonthReportPage({ go }: { go: Go }) {
             <tr><th>在途存款</th><td></td><td></td><td></td><td className="num"><Money value={r.closingInTransit.net} /></td></tr>
             <tr className="total"><th>資產合計</th><td></td><td></td><td></td><td className="num"><Money value={r.balances.reduce((s, b) => s + b.closing, 0) + r.closingInTransit.net} strong /></td></tr>
             {r.prepaid !== 0 && <tr className="sub-line"><th>其中：預收管理費（已入帳，待以後月份銷帳）</th><td></td><td></td><td></td><td className="num"><Money value={r.prepaid} /></td></tr>}
-            {r.suspense !== 0 && <tr className="sub-line"><th>其中：暫收款（已入帳，尚無應繳可銷帳）</th><td></td><td></td><td></td><td className="num"><Money value={r.suspense} /></td></tr>}
+            {r.suspense !== 0 && <tr className="sub-line"><th>其中：暫收款（已入帳，期別的每月應繳還沒匯入）</th><td></td><td></td><td></td><td className="num"><Money value={r.suspense} /></td></tr>}
           </tbody>
         </table>
         <p className="hint no-print">銀行帳戶的「本月結存」應與存摺餘額相同；若不同，請到「撥款對帳」確認實際入帳日，或檢查收支記帳是否漏登（例如利息、銀行手續費）。</p>

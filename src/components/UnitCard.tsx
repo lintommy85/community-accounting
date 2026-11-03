@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { cardMonths, dueFor, summarizeUnit, UnitAccount } from '../lib/allocation';
+import { cardMonths, dueFor, isOpeningPayment, summarizeUnit, UnitAccount } from '../lib/allocation';
 import { withCommunity } from '../lib/defaults';
 import { ownerAt, ownerHistory } from '../lib/owners';
 import { Payment } from '../lib/types';
@@ -7,7 +7,7 @@ import { useStore } from '../store';
 import AllocationEditor from './AllocationEditor';
 import { Money, thisMonth } from './ui';
 
-const SOURCE_LABEL = { manual: '手動', period: '依期別', auto: '自動' } as const;
+const SOURCE_LABEL = { manual: '手動', period: '依期別', offset: '預收沖銷', auto: '自動' } as const;
 
 /** 戶別帳卡：逐月應繳／銷帳明細與每筆繳款的銷帳情形。 */
 export default function UnitCard({ account, startMonth, onBack }: { account: UnitAccount; startMonth: string; onBack: () => void }) {
@@ -73,19 +73,20 @@ export default function UnitCard({ account, startMonth, onBack }: { account: Uni
 
         <h2 className="statement-block">繳款紀錄</h2>
         <table className="report">
-          <thead><tr><th>繳費日</th><th>方式</th><th>期別</th><th className="num">金額</th><th className="num">已銷帳</th><th className="num">暫收</th><th>銷帳方式</th><th>備註</th><th className="no-print"></th></tr></thead>
+          <thead><tr><th>繳費日</th><th>方式</th><th>期別</th><th className="num">金額</th><th className="num">已銷帳</th><th className="num">暫收／預收</th><th>銷帳方式</th><th>備註</th><th className="no-print"></th></tr></thead>
           <tbody>
             {account.feePayments.map((p) => {
               const allocated = allocatedOf(p.id);
+              const opening = isOpeningPayment(p.id);
               return (
-                <tr key={p.id}>
+                <tr key={p.id} className={opening ? 'sub-line' : ''}>
                   <td>{p.paidDate}</td><td>{p.channel}</td><td>{p.billPeriod}</td>
                   <td className="num"><Money value={p.amount} /></td>
                   <td className="num"><Money value={allocated} /></td>
                   <td className="num">{p.amount - allocated ? <Money value={p.amount - allocated} /> : ''}</td>
-                  <td>{p.allocations ? <span className="tag warn">手動</span> : p.billPeriod ? <span className="tag">依期別</span> : <span className="tag">自動（先銷舊欠）</span>}</td>
+                  <td>{opening ? <span className="tag ok">期初預收款</span> : p.allocations ? <span className="tag warn">手動</span> : p.billPeriod ? <span className="tag">依期別</span> : <span className="tag">自動（先銷舊欠）</span>}</td>
                   <td className="note-cell" title={p.note}>{p.note}</td>
-                  <td className="no-print"><button className="link" onClick={() => setEditing(p)}>調整銷帳</button></td>
+                  <td className="no-print">{!opening && <button className="link" onClick={() => setEditing(p)}>調整銷帳</button>}</td>
                 </tr>
               );
             })}

@@ -52,6 +52,8 @@ export interface Unit {
   cycle?: number;
   /** 週期起始月份（1～12），例如年繳從 7 月開始；未設定為 1 月。 */
   cycleStart?: number;
+  /** 期初預收款：帳務起始月之前已預繳（例如年繳、半年繳）、尚未沖銷的金額，從起始月起依序銷帳。 */
+  openingPrepaid?: number;
 }
 
 /** 某段期間的所有權人：from 起（YYYY-MM；空字串表示最早），到下一筆的起始月份之前。最早一筆也套用到更早的月份。 */

@@ -117,9 +117,9 @@ describe('management fee received in the month, written off per month', () => {
     expect(labels).toEqual([
       ['管理費收入－管理費', 2000, false],
       ['　其中：當期銷帳', 1000, true],
+      // 所有項目都列入銷帳；10 月已有帳單、銷完還多 300，是多繳，列為預收
+      ['　其中：預收（預繳、多繳）', 300, true],
       ['　其中：補繳以前月份', 1000, true],
-      // 所有項目都列入銷帳；沒有車位費帳單，所以 300 為暫收
-      ['　其中：暫收（尚無應繳可銷帳）', 300, true],
       ['管理費收入－車位清潔費', 300, false],
       ['利息收入', 30, false],
     ]);
@@ -135,7 +135,8 @@ describe('management fee received in the month, written off per month', () => {
     const get = (label: string) => st.income.find((l) => l.label === label)?.values[0];
     expect(get('管理費收入－管理費')).toBe(2000);
     expect(get('　其中：當期銷帳')).toBe(500);
-    expect(get('　其中：預收（銷以後月份）')).toBe(1500);
+    // 預繳 11 月～1 月 1500，加上同日多繳的車位清潔費 300
+    expect(get('　其中：預收（預繳、多繳）')).toBe(1800);
   });
 });
 
@@ -148,12 +149,11 @@ describe('財務收支總表 lines', () => {
     d.dues = ['2026-10', '2026-11'].map((month) => ({ id: month, unitNo: 'A2', month, item: '管理費', amount: 1000, source: 'import' as const, note: '', updatedAt: '' }));
     d.settings.fixedCategories = ['電費'];
     const sheet = monthSheet(d, '2026-10');
-    // 所有收費項目共用同一個銷帳順序：同日繳的車位清潔費先銷 10 月，管理費剩餘部分列預收／暫收
+    // 所有收費項目共用同一個銷帳順序：同日繳的車位清潔費先銷 10 月，管理費剩餘部分是預繳、多繳，列預收
     expect(sheet.income.map((l) => [l.subject, l.item, l.amount, l.fixed])).toEqual([
       ['管理費收入', '車位清潔費收入', 300, false],
       ['管理費收入', '管理費收入', 700, false],
-      ['管理費收入', '管理費預收款', 1000, false],
-      ['管理費收入', '管理費暫收款', 300, false],
+      ['管理費收入', '管理費預收款', 1300, false],
       ['利息收入', '利息收入', 30, false],
     ]);
     expect(sheet.income.filter((l) => l.subject === '管理費收入').reduce((s, l) => s + l.amount, 0)).toBe(2300);

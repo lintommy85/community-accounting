@@ -37,7 +37,7 @@ export default function WriteOffSheet({ data, month, report, printOnly }: { data
               <td>{l.payment.billPeriod}</td>
               <td>
                 {l.allocations.map((a) => `${monthLabel(a.month)} ${formatMoney(a.amount)}`).join('、')}
-                {l.credit ? `${l.allocations.length ? '、' : ''}暫收 ${formatMoney(l.credit)}` : ''}
+                {l.credit ? `${l.allocations.length ? '、' : ''}${l.pending ? '暫收' : '預收'} ${formatMoney(l.credit)}` : ''}
               </td>
               <td className="fs-num">{formatMoney(l.payment.amount)}</td>
             </tr>
