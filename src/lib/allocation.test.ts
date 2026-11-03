@@ -141,12 +141,19 @@ describe('deleted units', () => {
     expect(r.unmatched.map((p) => p.unitNo)).toEqual(['A1-3F']);
   });
 
-  it('does not re-add deleted units from a template import', async () => {
-    const { mergeUnits } = await import('./dues');
+  it('keeps excluded units excluded on a template import unless unticked', async () => {
+    const { applyUnitImport, excludedKeys, planUnitImport } = await import('./owners');
     const units = [{ id: 'x', unitNo: '管理室', owner: '', monthlyFee: 0, note: '', deletedAt: '2026-11-01' }];
-    const out = mergeUnits(units, [{ unitNo: '管理室', owner: '管理室', zsId: 'z', address: '' }, { unitNo: '(A01-02)35號2樓之1', owner: '王', zsId: 'y', address: '' }], () => 0);
-    expect([out.added, out.updated, out.skippedDeleted]).toEqual([1, 0, 1]);
-    expect(out.units[0]).toEqual(units[0]);
+    const incoming = [{ unitNo: '管理室', owner: '管理室', zsId: 'z', address: '', month: '2026-11' }, { unitNo: '(A01-02)35號2樓之1', owner: '王', zsId: 'y', address: '', month: '2026-11' }];
+    const plan = planUnitImport(units, incoming);
+    expect([plan.added, plan.restored]).toEqual([1, 0]);
+    expect(Array.from(excludedKeys(units, plan))).toEqual(['管理室']);
+    const out = applyUnitImport(units, plan, new Set(), () => 'n');
+    expect(out[0]).toEqual(units[0]);
+    const back = planUnitImport(units, incoming, new Map([['管理室', false]]));
+    expect(back.restored).toBe(1);
+    expect(excludedKeys(units, back).size).toBe(0);
+    expect(applyUnitImport(units, back, new Set(), () => 'n')[0].deletedAt).toBeUndefined();
   });
 });
 

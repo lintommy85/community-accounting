@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { allocateAll, AmountCheck, dueFor, normUnit } from '../lib/allocation';
 import { formatMoney } from '../lib/defaults';
+import { ownerAt } from '../lib/owners';
 import { AppData, MonthAmount } from '../lib/types';
 
 export interface ReviewDecision {
@@ -104,7 +105,7 @@ export default function ImportReview({
         </div>
         <table className="kv">
           <tbody>
-            <tr><th>戶別</th><td>{acc.unit.unitNo}　{acc.unit.owner}</td></tr>
+            <tr><th>戶別</th><td>{acc.unit.unitNo}　{ownerAt(acc.unit, c.months[0])}</td></tr>
             <tr><th>繳費</th><td>{p.paidDate}　{p.channel}　期別 {p.billPeriod || '（無）'}　<strong>{formatMoney(p.amount)}</strong> 元</td></tr>
             <tr>
               <th>帳單金額</th>

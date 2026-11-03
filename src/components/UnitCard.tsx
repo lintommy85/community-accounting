@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { cardMonths, dueFor, summarizeUnit, UnitAccount } from '../lib/allocation';
 import { withCommunity } from '../lib/defaults';
+import { ownerAt, ownerHistory } from '../lib/owners';
 import { Payment } from '../lib/types';
 import { useStore } from '../store';
 import AllocationEditor from './AllocationEditor';
@@ -16,6 +17,8 @@ export default function UnitCard({ account, startMonth, onBack }: { account: Uni
   const months = cardMonths(account, thisMonth());
   const sum = summarizeUnit(account, months[0] ?? startMonth, thisMonth());
   const payById = new Map(account.feePayments.map((p) => [p.id, p]));
+  const owners = ownerHistory(unit);
+  const changed = owners.length > 1;
   const allocatedOf = (id: string) => account.allocations.filter((a) => a.paymentId === id).reduce((s, a) => s + a.amount, 0);
 
   return (
@@ -26,7 +29,12 @@ export default function UnitCard({ account, startMonth, onBack }: { account: Uni
       </div>
       <section className="card">
         <h1 className="statement-title">{withCommunity(data.settings, '管理費帳卡')}</h1>
-        <p className="statement-sub">戶別 {unit.unitNo}　{unit.owner && `所有權人 ${unit.owner}　`}列印日 {new Date().toLocaleDateString('zh-TW')}</p>
+        <p className="statement-sub">戶別 {unit.unitNo}　{unit.owner && `${changed ? '目前所有權人' : '所有權人'} ${unit.owner}　`}列印日 {new Date().toLocaleDateString('zh-TW')}</p>
+        {changed && (
+          <p className="statement-sub">
+            所有權人紀錄：{owners.map((o) => `${o.from ? `${o.from} 起` : '最早'} ${o.owner || '（空白）'}`).join('　→　')}
+          </p>
+        )}
         <div className="stats">
           <div className="stat"><div className="stat-label">截至本月應繳</div><div className="stat-value"><Money value={sum.due} /></div></div>
           <div className="stat"><div className="stat-label">已銷帳</div><div className="stat-value"><Money value={sum.paid} /></div></div>
@@ -35,9 +43,9 @@ export default function UnitCard({ account, startMonth, onBack }: { account: Uni
         </div>
 
         <h2 className="statement-block">逐月銷帳</h2>
-        {months.length === 0 && <p className="empty">這一戶還沒有任何應繳紀錄，請到「戶別與月費 → 每月應繳」輸入或匯入帳單。</p>}
+        {months.length === 0 && <p className="empty">這一戶還沒有任何應繳紀錄，請到「匯入智生活報表 → 每月應繳報表」匯入智生活管理費匯入範本。</p>}
         <table className="report">
-          <thead><tr><th>月份</th><th className="num">應繳</th><th className="num">已銷</th><th className="num">未繳</th><th>銷帳來源</th></tr></thead>
+          <thead><tr><th>月份</th>{changed && <th>所有權人</th>}<th className="num">應繳</th><th className="num">已銷</th><th className="num">未繳</th><th>銷帳來源</th></tr></thead>
           <tbody>
             {months.map((m) => {
               const due = dueFor(account, m);
@@ -47,6 +55,7 @@ export default function UnitCard({ account, startMonth, onBack }: { account: Uni
               return (
                 <tr key={m} className={paid < due && !future ? 'attention' : ''}>
                   <td>{m}{future && paid > 0 ? '（預繳）' : ''}</td>
+                  {changed && <td>{ownerAt(unit, m)}</td>}
                   <td className="num"><Money value={due} /></td>
                   <td className="num">{paid ? <Money value={paid} /> : ''}</td>
                   <td className="num">{due > paid ? <Money value={due - paid} /> : ''}</td>

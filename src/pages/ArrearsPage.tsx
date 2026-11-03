@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import type { PageKey } from '../App';
+import FirstSetupGuide from '../components/FirstSetupGuide';
+import type { Go } from '../components/nav';
 import HouseholdSetup from '../components/HouseholdSetup';
 import UnitCard from '../components/UnitCard';
 import { Money, Section, thisMonth } from '../components/ui';
@@ -8,11 +9,12 @@ import { addMonths, monthRange } from '../lib/dates';
 import { fileBase, withCommunity } from '../lib/defaults';
 import { downloadBlob } from '../lib/storage';
 import { exportUnitSummaries } from '../lib/xlsxio';
+import { ownerHistory, ownerMatches } from '../lib/owners';
 import { useStore } from '../store';
 
 type View = 'units' | 'matrix';
 
-export default function ArrearsPage({ go }: { go: (p: PageKey) => void }) {
+export default function ArrearsPage({ go }: { go: Go }) {
   const { data } = useStore();
   const s = data.settings;
   const alloc = useMemo(() => allocateAll(data), [data]);
@@ -24,6 +26,15 @@ export default function ArrearsPage({ go }: { go: (p: PageKey) => void }) {
   const [cardKey, setCardKey] = useState('');
   const [notice, setNotice] = useState<UnitSummary | null>(null);
   const [editSetup, setEditSetup] = useState(false);
+
+  if (!s.units.some((u) => !u.deletedAt)) {
+    return (
+      <>
+        <h1>欠費／銷帳</h1>
+        <FirstSetupGuide go={go} />
+      </>
+    );
+  }
 
   if (!s.totalUnits || editSetup) {
     return (
@@ -46,7 +57,7 @@ export default function ArrearsPage({ go }: { go: (p: PageKey) => void }) {
   const kw = q.trim().toUpperCase();
   const shown = summaries
     .filter((r) => !onlyOwing || r.owing > 0)
-    .filter((r) => !kw || r.account.unit.unitNo.toUpperCase().includes(kw) || r.account.unit.owner.toUpperCase().includes(kw));
+    .filter((r) => !kw || r.account.unit.unitNo.toUpperCase().includes(kw) || ownerMatches(r.account.unit, kw));
   const totals = shown.reduce(
     (t, r) => ({ due: t.due + r.due, paid: t.paid + r.paid, owing: t.owing + r.owing, prepaid: t.prepaid + r.prepaid, received: t.received + r.received }),
     { due: 0, paid: 0, owing: 0, prepaid: 0, received: 0 },
@@ -103,7 +114,7 @@ export default function ArrearsPage({ go }: { go: (p: PageKey) => void }) {
                 {shown.map((r) => (
                   <tr key={r.account.key} className={r.owing ? 'attention' : ''}>
                     <td><button className="link" onClick={() => setCardKey(r.account.key)}>{r.account.unit.unitNo}</button></td>
-                    <td>{r.account.unit.owner}</td>
+                    <td>{r.account.unit.owner}{ownerHistory(r.account.unit).length > 1 && <span className="tag warn" title="所有權人有變更，點戶別看帳卡的所有權人紀錄">曾變更</span>}</td>
                     <td className="num"><Money value={r.account.unit.monthlyFee} /></td>
                     <td className="num"><Money value={r.due} /></td>
                     <td className="num"><Money value={r.paid} /></td>
@@ -141,7 +152,7 @@ export default function ArrearsPage({ go }: { go: (p: PageKey) => void }) {
                 {shown.map((r) => (
                   <tr key={r.account.key}>
                     <td><button className="link" onClick={() => setCardKey(r.account.key)}>{r.account.unit.unitNo}</button></td>
-                    <td>{r.account.unit.owner}</td>
+                    <td>{r.account.unit.owner}{ownerHistory(r.account.unit).length > 1 && <span className="tag warn" title="所有權人有變更，點戶別看帳卡的所有權人紀錄">曾變更</span>}</td>
                     {months.map((m) => {
                       const due = dueFor(r.account, m);
                       const paid = r.account.paidByMonth.get(m) ?? 0;

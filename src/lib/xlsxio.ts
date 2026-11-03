@@ -4,6 +4,7 @@ import { AccountRegister, netAmount, MonthReport } from './ledger';
 import { decodeText, Grid } from './parser';
 import { BREAKDOWN_LABELS, PositionSummary, signatureRows, Statement } from './statement';
 import { UnitSummary } from './allocation';
+import { ownerHistory, ownerHistoryText } from './owners';
 import { AppData, FieldKey } from './types';
 
 export interface SheetGrid {
@@ -93,7 +94,7 @@ export function exportAllToExcel(data: AppData): Blob {
   );
   XLSX.utils.book_append_sheet(
     wb,
-    sheet(settings.units.map((u) => ({ 戶別: u.unitNo, 所有權人: u.owner, 每月應繳基準: u.monthlyFee, 地址: u.address ?? '', 狀態: u.deletedAt ? `已刪除 ${u.deletedAt.slice(0, 10)}` : '使用中', 備註: u.note }))),
+    sheet(settings.units.map((u) => ({ 戶別: u.unitNo, 所有權人: u.owner, 所有權人紀錄: ownerHistory(u).length > 1 ? ownerHistoryText(u) : '', 每月應繳基準: u.monthlyFee, 地址: u.address ?? '', 狀態: u.deletedAt ? `已排除 ${u.deletedAt.slice(0, 10)}` : '使用中', 備註: u.note }))),
     '戶別',
   );
   XLSX.utils.book_append_sheet(

@@ -1,11 +1,10 @@
 import { useMemo, useState } from 'react';
-import type { PageKey } from '../App';
 import { Money, Section } from '../components/ui';
 import { FIELD_LABELS, newId, REQUIRED_FIELDS } from '../lib/defaults';
 import { monthOf } from '../lib/dates';
 import BillImport from '../components/BillImport';
 import ImportReview, { ReviewDecision } from '../components/ImportReview';
-import { useNavArg } from '../components/nav';
+import { Go, useNavArg } from '../components/nav';
 import { AmountCheck, findAmountMismatches } from '../lib/allocation';
 import { MergeResult, mergeRows } from '../lib/ledger';
 import { extractRows, gridToTable, guessMapping, missingRequired, detectHeaderRow, sheetMeta } from '../lib/parser';
@@ -13,7 +12,7 @@ import { AppData, ColumnMapping, FieldKey } from '../lib/types';
 import { readWorkbook, SheetGrid } from '../lib/xlsxio';
 import { useStore } from '../store';
 
-export default function ImportPage({ go }: { go: (p: PageKey) => void }) {
+export default function ImportPage({ go }: { go: Go }) {
   const { data, update, isClosed } = useStore();
   const [fileName, setFileName] = useState('');
   const [sheets, setSheets] = useState<SheetGrid[]>([]);
@@ -160,7 +159,7 @@ export default function ImportPage({ go }: { go: (p: PageKey) => void }) {
       </div>
       {tab === 'dues' ? (
         <Section title="每月應繳報表（智生活管理費匯入範本）">
-          <BillImport />
+          <BillImport go={go} />
         </Section>
       ) : (
         <>

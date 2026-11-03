@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
-import type { Go } from '../components/nav';
+import FirstSetupGuide from '../components/FirstSetupGuide';
+import { Go, useNavArg } from '../components/nav';
+import OwnerHistory from '../components/OwnerHistory';
 import MonthDues from '../components/MonthDues';
 import { useSelection } from '../components/useSelection';
 import { isEnterKey, Money, Section } from '../components/ui';
@@ -7,6 +9,7 @@ import { normUnit } from '../lib/allocation';
 import { newId } from '../lib/defaults';
 import { BILL_ARREARS, BILL_ASIS, BILL_PREPAID } from '../lib/bills';
 import { activeUnits, assignAmount, assignCycle, assignExtra, assignPlan, cycleLabel, CYCLES, extraItem, feeItemNames, MGMT_ITEM, planFee, removeExtra, setUnitItemBaseline, removePlan, setUnitArea, sortUnits, unitBaseline, updatePlan } from '../lib/fees';
+import { ownerHistory, ownerMatches } from '../lib/owners';
 import { FeePlan, Settings, Unit } from '../lib/types';
 import { useStore } from '../store';
 
@@ -18,7 +21,8 @@ export default function UnitsPage({ go }: { go: Go }) {
   const { data, update } = useStore();
   const s = data.settings;
   const live = activeUnits(s.units);
-  const [tab, setTab] = useState<Tab>('dues');
+  const [tab, setTab] = useState<Tab>(useNavArg() === 'units' ? 'units' : 'dues');
+  const [ownerUnit, setOwnerUnit] = useState<Unit | null>(null);
   const [q, setQ] = useState('');
   const [planFilter, setPlanFilter] = useState('');
   const [batchPlan, setBatchPlan] = useState('');
@@ -36,7 +40,7 @@ export default function UnitsPage({ go }: { go: Go }) {
   const kw = q.trim().toUpperCase();
   const shown = units
     .filter((u) => !planFilter || (planFilter === CUSTOM ? !u.planId : u.planId === planFilter || !!u.extras?.some((e) => e.planId === planFilter)))
-    .filter((u) => !kw || u.unitNo.toUpperCase().includes(kw) || u.owner.toUpperCase().includes(kw));
+    .filter((u) => !kw || u.unitNo.toUpperCase().includes(kw) || ownerMatches(u, kw));
   const { sel, setSel, toggle, selectShown, selectedShown } = useSelection(shown);
 
   const labelOf = (ids: Set<string>) => {
@@ -58,9 +62,9 @@ export default function UnitsPage({ go }: { go: Go }) {
   }
 
   function removeSelected() {
-    if (!sel.size || !confirm(`刪除勾選的 ${sel.size} 個戶別？\n刪除後不列入應繳與欠費，可在「基本設定 → 已刪除的戶別」查看並加回；已匯入的繳費紀錄不會刪除。`)) return;
+    if (!sel.size || !confirm(`排除勾選的 ${sel.size} 個戶別？\n排除後不列入應繳、欠費與銷帳，之後匯入範本也會自動略過；可在「基本設定 → 已排除的戶別」加回。已匯入的繳費紀錄不會刪除。`)) return;
     const at = new Date().toISOString();
-    save((st) => ({ units: st.units.map((u) => (sel.has(u.id) ? { ...u, deletedAt: at } : u)) }), '刪除戶別', labelOf(sel));
+    save((st) => ({ units: st.units.map((u) => (sel.has(u.id) ? { ...u, deletedAt: at } : u)) }), '排除戶別', labelOf(sel));
     setSel(new Set());
   }
 
@@ -70,7 +74,7 @@ export default function UnitsPage({ go }: { go: Go }) {
     const existing = s.units.find((u) => normUnit(u.unitNo) === normUnit(unitNo));
     if (existing && !existing.deletedAt) return alert(`戶別 ${unitNo} 已存在`);
     if (existing) {
-      if (!confirm(`戶別 ${existing.unitNo} 之前已刪除，要加回嗎？`)) return;
+      if (!confirm(`戶別 ${existing.unitNo} 之前已排除，要加回嗎？`)) return;
       save((st) => ({ units: st.units.map((u) => (u.id === existing.id ? { ...u, deletedAt: undefined } : u)) }), '加回戶別', existing.unitNo);
       return setNewUnit('');
     }
@@ -129,16 +133,11 @@ export default function UnitsPage({ go }: { go: Go }) {
         <button onClick={() => go('arrears')}>{s.totalUnits ? '修改總戶數' : '設定總戶數'}</button>
       </div>
 
+      {(live.length === 0 || !data.dues.length) && <FirstSetupGuide go={go} here={tab === 'units' ? 'units' : undefined} />}
       {tab === 'dues' ? (
-        <MonthDues go={go} />
+        live.length > 0 && <MonthDues go={go} />
       ) : (
         <>
-          {live.length === 0 && (
-            <div className="banner warn">
-              <span>尚未建立戶別。請到「匯入智生活報表 → 每月應繳報表」匯入智生活的管理費匯入範本，會依戶別代碼建立所有戶別。</span>
-              <button className="primary" onClick={() => go('import', 'dues')}>前往匯入</button>
-            </div>
-          )}
           <PlanEditor
             plans={s.feePlans}
             units={live}
@@ -168,7 +167,7 @@ export default function UnitsPage({ go }: { go: Go }) {
               <input type="number" placeholder="每月應繳基準" value={batchAmount} onChange={(e) => setBatchAmount(e.target.value)} />
               <button disabled={!sel.size || batchAmount === ''} onClick={applyBatchAmount}>設定個別金額</button>
               <span className="divider" />
-              <button className="danger" disabled={!sel.size} onClick={removeSelected}>刪除</button>
+              <button className="danger" disabled={!sel.size} onClick={removeSelected} title="不需要管理的戶別（例如管理室、公設）">排除</button>
             </div>
             <div className="batch-bar">
               <span>加收：</span>
@@ -192,7 +191,7 @@ export default function UnitsPage({ go }: { go: Go }) {
               <button disabled={!sel.size} onClick={applyBatchCycle}>套用週期</button>
             </div>
             <p className="hint">
-              按住 Shift 再點勾選框可以一次勾選一整段。基準＝方案（或個別金額）＋加收（例如機車位清潔費，可設數量），只在匯入智生活帳單時拿來比對：
+              按住 Shift 再點勾選框可以一次勾選一整段。點所有權人可查看變更紀錄或新增變更（只影響生效月份與之後）。不需要管理的戶別（例如管理室）勾選後按「排除」。基準＝方案（或個別金額）＋加收（例如機車位清潔費，可設數量），只在匯入智生活帳單時拿來比對：
               本期應繳採用基準，帳單超過基準的部分視為帳單內含的逾期。已匯入的月份會保留當時的基準，之後調漲或調降不會影響之前的比對。
               季繳、年繳等請設定繳費週期與起始月份（例如年繳 7 月起），帳單會拆到週期內每個月；智生活只會在週期的第一個月開帳單。
             </p>
@@ -209,7 +208,12 @@ export default function UnitsPage({ go }: { go: Go }) {
                     <tr key={u.id} className={sel.has(u.id) ? 'selected' : ''}>
                       <td><input type="checkbox" checked={sel.has(u.id)} onClick={(e) => toggle(e, i)} onChange={() => {}} /></td>
                       <td>{u.unitNo}</td>
-                      <td><input defaultValue={u.owner} key={`o${u.owner}`} onBlur={(e) => e.target.value !== u.owner && setUnit(u, { owner: e.target.value.trim() })} /></td>
+                      <td>
+                        <span className="owner-cell">
+                          <button className="link" title="查看／變更所有權人紀錄" onClick={() => setOwnerUnit(u)}>{u.owner || '設定所有權人'}</button>
+                          {ownerHistory(u).length > 1 && <span className="tag warn" title="所有權人有變更紀錄">變更 {ownerHistory(u).length - 1} 次</span>}
+                        </span>
+                      </td>
                       <td><input type="number" className="short" defaultValue={u.area ?? ''} key={`a${u.area}`} onBlur={(e) => {
                         const area = Number(e.target.value) || undefined;
                         if (area !== u.area) save((st) => ({ units: setUnitArea(st.units, st.feePlans, u.id, area) }), '修改坪數', `${u.unitNo} ${area ?? ''}`);
@@ -266,6 +270,7 @@ export default function UnitsPage({ go }: { go: Go }) {
           <BillItemMapEditor />
         </>
       )}
+      {ownerUnit && <OwnerHistory unit={ownerUnit} onClose={() => setOwnerUnit(null)} />}
     </>
   );
 }

@@ -66,7 +66,8 @@ const zsTemplate = [
 
 describe('智生活管理費匯入範本 format', () => {
   it('detects item columns between 應繳總額 and 繳費開始日期 and builds dues and units', async () => {
-    const { detectWideLayout, dueRowsFromWide, mergeUnits } = await import('./dues');
+    const { detectWideLayout, dueRowsFromWide } = await import('./dues');
+    const { applyUnitImport, planUnitImport } = await import('./owners');
     const table = billTable('繳費單列表', zsTemplate);
     expect(table.headerRow).toBe(2);
     const layout = detectWideLayout(table.headers)!;
@@ -79,15 +80,21 @@ describe('智生活管理費匯入範本 format', () => {
       ['(A02-02)35號2樓之2', '2026-11', '減收', -200],
     ]);
     expect(issues).toEqual([]);
-    expect(units.map((u) => [u.unitNo, u.owner, u.zsId])).toEqual([
-      ['(A01-02)35號2樓之1', '王小明', 'id-1'],
-      ['(A02-02)35號2樓之2', '李大華', 'id-2'],
-      ['(B07-07)37號7樓之7', '陳美麗', 'id-3'],
-      ['管理室', '管理室', 'id-4'],
+    expect(units.map((u) => [u.unitNo, u.owner, u.zsId, u.month])).toEqual([
+      ['(A01-02)35號2樓之1', '王小明', 'id-1', '2026-11'],
+      ['(A02-02)35號2樓之2', '李大華', 'id-2', '2026-11'],
+      ['(B07-07)37號7樓之7', '陳美麗', 'id-3', ''],
+      ['管理室', '管理室', 'id-4', ''],
     ]);
-    const merged = mergeUnits([{ id: 'x', unitNo: '(B07-07)37號7樓之7', owner: '', monthlyFee: 0, note: '' }], units, () => 0);
-    expect([merged.added, merged.updated, merged.units.length]).toEqual([3, 1, 4]);
-    expect(merged.units[0]).toMatchObject({ owner: '陳美麗', zsId: 'id-3' });
+    const existing = [{ id: 'x', unitNo: '(B07-07)37號7樓之7', owner: '', monthlyFee: 0, note: '' }];
+    const plan = planUnitImport(existing, units, new Map([['管理室', true]]));
+    expect([plan.added, plan.fills, plan.ownerDiffs.length]).toEqual([2, 1, 0]);
+    let n = 0;
+    const merged = applyUnitImport(existing, plan, new Set(), () => `u${++n}`);
+    expect(merged.length).toBe(4);
+    expect(merged[0]).toMatchObject({ owner: '陳美麗', zsId: 'id-3' });
+    expect(merged.find((u) => u.unitNo === '管理室')).toMatchObject({ note: '匯入時排除' });
+    expect(merged.find((u) => u.unitNo === '管理室')!.deletedAt).toBeTruthy();
   });
 
   it('uses the fallback month when 繳費開始日期 is blank', async () => {

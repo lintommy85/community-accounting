@@ -1,7 +1,8 @@
 import { parseDate, parsePeriods } from './dates';
 import { newId, parseAmount } from './defaults';
 import { cellText, Cell, SheetTable } from './parser';
-import { Due, Unit } from './types';
+import type { IncomingUnit } from './owners';
+import { Due } from './types';
 
 export const DEFAULT_ITEM = '管理費';
 export const PRIOR_ITEM = '前期欠款';
@@ -124,12 +125,7 @@ export function applyDueChanges(existing: Due[], changes: DueChange[], now = new
   return out;
 }
 
-export interface UnitRow {
-  unitNo: string;
-  owner: string;
-  zsId: string;
-  address: string;
-}
+export type UnitRow = IncomingUnit;
 
 /** 智生活「管理費匯入範本」：一戶一列，應繳總額與繳費開始日期之間的每一欄是一個收費項目。 */
 export interface WideLayout {
@@ -177,11 +173,11 @@ export function dueRowsFromWide(
     const unitNo = text(r, layout.unitCol);
     if (!unitNo || isFilterRow(unitNo) || /^\(如留空白/.test(unitNo)) continue;
     const owner = text(r, layout.ownerCol);
-    if (!units.has(normUnit(unitNo))) units.set(normUnit(unitNo), { unitNo, owner, zsId: text(r, layout.idCol), address: text(r, layout.addressCol) });
-    const amounts = layout.itemCols.map((c) => [itemName(c), parseAmount(r[c] ?? null)] as const).filter(([, a]) => a);
-    if (!amounts.length) continue;
     const start = layout.startCol ? parseDate(r[layout.startCol] ?? null) : '';
     const month = start ? start.slice(0, 7) : fallbackMonth;
+    if (!units.has(normUnit(unitNo))) units.set(normUnit(unitNo), { unitNo, owner, zsId: text(r, layout.idCol), address: text(r, layout.addressCol), month });
+    const amounts = layout.itemCols.map((c) => [itemName(c), parseAmount(r[c] ?? null)] as const).filter(([, a]) => a);
+    if (!amounts.length) continue;
     if (!month) {
       issues.push({ rowNumber: Number(r.__row), reason: '沒有繳費開始日期，請指定帳單月份' });
       continue;
@@ -193,37 +189,4 @@ export function dueRowsFromWide(
     }
   }
   return { rows: Array.from(merged.values()), units: Array.from(units.values()), issues };
-}
-
-/** 依匯入的戶別清單新增戶別，或補上既有戶別缺少的所有權人、智生活 Id、地址。 */
-export function mergeUnits(
-  existing: Unit[],
-  incoming: UnitRow[],
-  defaultFee: (unitNo: string) => number,
-): { units: Unit[]; added: number; updated: number; skippedDeleted: number } {
-  const out = existing.slice();
-  const index = new Map(out.map((u, i) => [normUnit(u.unitNo), i]));
-  let added = 0;
-  let updated = 0;
-  let skippedDeleted = 0;
-  for (const u of incoming) {
-    const i = index.get(normUnit(u.unitNo));
-    if (i !== undefined && out[i].deletedAt) {
-      skippedDeleted++;
-      continue;
-    }
-    if (i === undefined) {
-      out.push({ id: newId('u_'), unitNo: u.unitNo, owner: u.owner, monthlyFee: defaultFee(u.unitNo), note: '', zsId: u.zsId || undefined, address: u.address || undefined });
-      index.set(normUnit(u.unitNo), out.length - 1);
-      added++;
-      continue;
-    }
-    const prev = out[i];
-    const next = { ...prev, owner: prev.owner || u.owner, zsId: prev.zsId || u.zsId || undefined, address: prev.address || u.address || undefined };
-    if (next.owner !== prev.owner || next.zsId !== prev.zsId || next.address !== prev.address) {
-      out[i] = next;
-      updated++;
-    }
-  }
-  return { units: out, added, updated, skippedDeleted };
 }

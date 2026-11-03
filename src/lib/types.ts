@@ -32,7 +32,10 @@ export interface Account {
 export interface Unit {
   id: string;
   unitNo: string;
+  /** 目前的所有權人（owners 最後一筆）。 */
   owner: string;
+  /** 所有權人紀錄（依起始月份排序）；變更只影響起始月份與之後，之前的月份仍顯示原所有權人。 */
+  owners?: OwnerPeriod[];
   monthlyFee: number;
   note: string;
   /** 套用的費率方案；未設定表示個別金額。 */
@@ -40,7 +43,7 @@ export interface Unit {
   /** 智生活的戶別 Id（匯入範本第一欄），保留以便對應。 */
   zsId?: string;
   address?: string;
-  /** 刪除時間；刪除的戶別保留在設定中，可以再加回。 */
+  /** 排除時間；排除的戶別不列入應繳與欠費，保留在設定中，可以再加回。 */
   deletedAt?: string;
   area?: number;
   /** 主方案以外的加收方案（例如機車位清潔費）與數量。 */
@@ -49,6 +52,15 @@ export interface Unit {
   cycle?: number;
   /** 週期起始月份（1～12），例如年繳從 7 月開始；未設定為 1 月。 */
   cycleStart?: number;
+}
+
+/** 某段期間的所有權人：from 起（YYYY-MM；空字串表示最早），到下一筆的起始月份之前。最早一筆也套用到更早的月份。 */
+export interface OwnerPeriod {
+  from: string;
+  owner: string;
+  source?: 'import' | 'manual';
+  /** 記錄時間。 */
+  at?: string;
 }
 
 /** 加收：套用方案 × 數量，或自訂某個繳費項目的金額（例如從帳單更新基準時金額不是方案的倍數）。 */

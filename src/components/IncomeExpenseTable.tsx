@@ -21,6 +21,10 @@ export default function IncomeExpenseTable({ st }: { st: Statement }) {
   return (
     <div className="table-wrap">
       <table className="report ie-table">
+        <colgroup>
+          <col />{st.columns.map((c) => <col key={`i${c}`} className="ie-num-col" />)}
+          <col />{st.columns.map((c) => <col key={`o${c}`} className="ie-num-col" />)}
+        </colgroup>
         <thead>
           <tr>
             <th colSpan={n + 1} className="ie-in-head">收　入</th>

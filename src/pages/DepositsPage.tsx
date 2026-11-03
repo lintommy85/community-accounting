@@ -34,7 +34,7 @@ export default function DepositsPage() {
       </p>
       {pending.length > 0 && (
         <div className="banner warn">
-          有 {pending.length} 筆繳費（<Money value={pending.reduce((sum, p) => sum + p.amount, 0)} /> 元）報表尚未提供入帳日，目前列為在途存款；之後匯入有入帳日的報表會自動更新。
+          <span>有 {pending.length} 筆繳費（<Money value={pending.reduce((sum, p) => sum + p.amount, 0)} /> 元）報表尚未提供入帳日，目前列為在途存款；之後匯入有入帳日的報表會自動更新。</span>
         </div>
       )}
       <Section title="撥款批次" actions={<MonthInput value={month} onChange={setMonth} />}>

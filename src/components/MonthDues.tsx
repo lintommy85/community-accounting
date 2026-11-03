@@ -3,6 +3,7 @@ import type { Go } from './nav';
 import { normUnit } from '../lib/allocation';
 import { PRIOR_ITEM } from '../lib/dues';
 import { activeUnits, cycleLabel, sortUnits, unitBaseline } from '../lib/fees';
+import { ownerAt, ownerMatches } from '../lib/owners';
 import { Due } from '../lib/types';
 import { useStore } from '../store';
 import { Money, MonthInput, Section, thisMonth } from './ui';
@@ -37,7 +38,7 @@ export default function MonthDues({ go }: { go: Go }) {
     return { u, current, due, bill, covered, hasBill: billRows.length > 0, carried: Math.max(0, bill - covered), prior, inCycle, base, issue };
   });
   const shown = rows
-    .filter((r) => !kw || r.u.unitNo.toUpperCase().includes(kw) || r.u.owner.toUpperCase().includes(kw))
+    .filter((r) => !kw || r.u.unitNo.toUpperCase().includes(kw) || ownerMatches(r.u, kw))
     .filter((r) => !onlyIssue || r.issue);
   const billed = rows.filter((r) => r.current.length).length;
   const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
@@ -73,7 +74,7 @@ export default function MonthDues({ go }: { go: Go }) {
             {shown.map((r) => (
               <tr key={r.u.id} className={r.issue && r.issue !== '尚未匯入' ? 'attention' : ''}>
                 <td>{r.u.unitNo}</td>
-                <td>{r.u.owner}</td>
+                <td>{ownerAt(r.u, month)}{ownerAt(r.u, month) !== r.u.owner && <span className="tag" title={`目前所有權人：${r.u.owner}`}>現為 {r.u.owner}</span>}</td>
                 <td>{cycleLabel(r.u)}</td>
                 <td className="num">{r.hasBill ? <Money value={r.covered} /> : r.inCycle ? '' : <span className="muted"><Money value={r.base * (r.u.cycle ?? 1)} /></span>}</td>
                 <td className="num">{r.hasBill ? <Money value={r.bill} /> : r.inCycle ? <span className="muted small">含於 {r.inCycle} 帳單</span> : ''}</td>

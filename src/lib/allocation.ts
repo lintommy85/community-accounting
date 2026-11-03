@@ -1,5 +1,6 @@
 import { addMonths, monthEnd, monthOf, monthRange, parsePeriods } from './dates';
 import { unitBaseline } from './fees';
+import { ownerAt } from './owners';
 import { normUnit, PRIOR_ITEM } from './dues';
 import { AppData, Payment, Unit } from './types';
 
@@ -325,7 +326,7 @@ export function monthWriteOffByUnit(result: AllocationResult, payments: Payment[
   const paidDate = new Map(payments.map((p) => [p.id, p.paidDate]));
   const rows: UnitWriteOff[] = [];
   for (const acc of result.accounts) {
-    const row: UnitWriteOff = { unitNo: acc.unit.unitNo, owner: acc.unit.owner, due: dueFor(acc, month), writtenOff: 0, fromPrepaid: 0, fromCurrent: 0, fromLater: 0, owing: 0 };
+    const row: UnitWriteOff = { unitNo: acc.unit.unitNo, owner: ownerAt(acc.unit, month), due: dueFor(acc, month), writtenOff: 0, fromPrepaid: 0, fromCurrent: 0, fromLater: 0, owing: 0 };
     for (const a of acc.allocations) {
       if (a.month !== month) continue;
       row.writtenOff += a.amount;
@@ -416,7 +417,7 @@ export function paidListForMonth(result: AllocationResult, payments: Payment[], 
     .filter((p) => !p.voided && p.paidDate.startsWith(month))
     .map((p) => {
       const acc = result.byKey.get(normUnit(p.unitNo));
-      return { payment: p, owner: acc?.unit.owner || p.payerName, allocations: result.byPayment.get(p.id) ?? [], credit: acc?.creditByPayment.get(p.id) ?? 0 };
+      return { payment: p, owner: (acc && ownerAt(acc.unit, month)) || p.payerName, allocations: result.byPayment.get(p.id) ?? [], credit: acc?.creditByPayment.get(p.id) ?? 0 };
     })
     .sort((a, b) => a.payment.unitNo.localeCompare(b.payment.unitNo, 'zh-Hant', { numeric: true }) || a.payment.paidDate.localeCompare(b.payment.paidDate));
 }
@@ -438,7 +439,7 @@ export function unpaidByMonth(result: AllocationResult, uptoMonth: string): Unpa
       if (month > uptoMonth) continue;
       const due = dueFor(acc, month);
       const paid = acc.paidByMonth.get(month) ?? 0;
-      if (paid < due) out.push({ unitNo: acc.unit.unitNo, owner: acc.unit.owner, month, due, paid, owing: due - paid });
+      if (paid < due) out.push({ unitNo: acc.unit.unitNo, owner: ownerAt(acc.unit, month), month, due, paid, owing: due - paid });
     }
   }
   return out;

@@ -85,8 +85,11 @@ export default function StatementPage() {
             <option value="deposit">依入帳日認列</option>
           </select>
           <button onClick={() => downloadBlob(exportStatement(data, title, sub, st, pos), `${title.replace(/\s+/g, '-')}.xlsx`)}>匯出 Excel</button>
-          <button className="primary" onClick={() => print('statement')}>列印收支報表</button>
-          {r && <button onClick={() => print('report')} title="彩色「財務收支總表」：收入與支出左右並列，附帳戶匯總與簽章">列印月報</button>}
+          {r ? (
+            <button className="primary" onClick={() => print('report')} title="彩色「財務收支總表」：收入與支出左右並列，附帳戶匯總與簽章">列印月報</button>
+          ) : (
+            <button className="primary" onClick={() => print('statement')}>列印年報</button>
+          )}
           {r?.writeOff && <button onClick={() => print('writeoff')}>列印管理費銷帳</button>}
         </div>
       </div>

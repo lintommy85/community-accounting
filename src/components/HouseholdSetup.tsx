@@ -49,7 +49,7 @@ export default function HouseholdSetup({ onDone }: { onDone?: () => void }) {
       )}
       <p className="hint">
         銷帳起始月份之前的月份不計應繳（例如開始使用本系統的月份）。總戶數用來檢查戶別是否都已建立；
-        戶別可由「匯入智生活報表 → 每月應繳報表」匯入智生活管理費匯入範本建立；入帳報表裡有尚未建立的戶別時，這裡會出現「從繳費紀錄帶入」。
+        戶別由「匯入智生活報表 → 每月應繳報表」匯入智生活管理費匯入範本建立（匯入時可勾選要排除的戶別）；入帳報表裡有尚未建立的戶別時，這裡會出現「從繳費紀錄帶入」。
       </p>
       <div className="form-row">
         <button className="primary" onClick={save}>儲存</button>

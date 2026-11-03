@@ -4,7 +4,7 @@ import CommunityProfile from '../components/CommunityProfile';
 import { lastMonth, Section, Stat, thisMonth } from '../components/ui';
 import { todayStr } from '../lib/dates';
 import { resolveDepositAccountId } from '../lib/defaults';
-import { activeUnits } from '../lib/fees';
+import { activeUnits, unitBaseline } from '../lib/fees';
 import { accountBalances, depositGroups, monthReport } from '../lib/ledger';
 import { useStore } from '../store';
 
@@ -26,12 +26,16 @@ export default function Dashboard({ go }: { go: Go }) {
   const lastImport = data.batches[data.batches.length - 1];
 
   const todos: { text: string; page: PageKey; arg?: string }[] = [];
+  const hasBase = units.some((u) => unitBaseline(u, data.settings.feePlans) > 0);
+  if (!units.length) todos.push({ text: '尚未建立戶別：從智生活後台「繳費單列表」匯出管理費匯入範本，到「匯入智生活報表 → 每月應繳報表」匯入，不需要管理的戶別勾選「排除」後按「建立戶別」', page: 'import', arg: 'dues' });
+  else if (!hasBase) todos.push({ text: '尚未設定基準與費率：到「戶別與月費 → 基準與費率」新增費率方案（例如坪數費、清潔費）並套用到每戶', page: 'units', arg: 'units' });
+  else if (!data.dues.length) todos.push({ text: '尚未建立每月應繳：再匯入一次智生活管理費匯入範本，和基準不同的逐戶選擇後確認匯入', page: 'import', arg: 'dues' });
   if (!data.settings.communityName) todos.push({ text: '尚未輸入社區名稱（可直接在上方輸入）', page: 'home' });
   if (!resolveDepositAccountId(data.settings)) todos.push({ text: '有多個銀行帳戶，請指定管理費撥款要轉入哪個帳戶', page: 'settings' });
-  if (units.length && !data.dues.some((d) => d.month === month)) todos.push({ text: `${month} 尚未匯入每月應繳（智生活管理費匯入範本）`, page: 'import', arg: 'dues' });
+  if (units.length && data.dues.length && !data.dues.some((d) => d.month === month)) todos.push({ text: `${month} 尚未匯入每月應繳（智生活管理費匯入範本）`, page: 'import', arg: 'dues' });
   if (data.settings.accounts.every((a) => !a.openingDate)) todos.push({ text: '尚未設定帳戶期初餘額與期初日期', page: 'settings' });
-  if (!data.settings.totalUnits) todos.push({ text: '尚未設定總戶數（欠費／銷帳需要）', page: 'arrears' });
-  else if (units.length !== data.settings.totalUnits) todos.push({ text: `戶別已建立 ${units.length}／${data.settings.totalUnits} 戶`, page: 'arrears' });
+  if (units.length && !data.settings.totalUnits) todos.push({ text: '尚未設定總戶數（欠費／銷帳需要）', page: 'settings' });
+  else if (units.length && units.length !== data.settings.totalUnits) todos.push({ text: `戶別已建立 ${units.length}／${data.settings.totalUnits} 戶`, page: 'arrears' });
   if (fileStatus !== 'linked' && fileStatus !== 'service') todos.push({ text: '資料只存在瀏覽器內，建議改用「社區帳務管理.exe」開啟', page: 'backup' });
   if (daysSinceBackup === null || daysSinceBackup > 30) todos.push({ text: daysSinceBackup === null ? '從未下載備份檔' : `已 ${daysSinceBackup} 天未下載備份`, page: 'backup' });
   if (overdue.length) todos.push({ text: `${overdue.length} 筆撥款已到預計日但尚未核對存摺`, page: 'deposits' });
@@ -74,7 +78,7 @@ export default function Dashboard({ go }: { go: Go }) {
           <tbody>
             <tr><th>繳費紀錄</th><td>{data.payments.length} 筆</td></tr>
             <tr><th>收支分錄</th><td>{data.entries.length} 筆</td></tr>
-            <tr><th>戶別</th><td>{units.length} 戶{data.settings.units.length > units.length ? `（另有 ${data.settings.units.length - units.length} 戶已刪除）` : ''}</td></tr>
+            <tr><th>戶別</th><td>{units.length} 戶{data.settings.units.length > units.length ? `（另有 ${data.settings.units.length - units.length} 戶已排除）` : ''}</td></tr>
             <tr><th>最近匯入</th><td>{lastImport ? `${lastImport.fileName}（${lastImport.importedAt.slice(0, 10)}，新增 ${lastImport.added} 筆）` : '尚未匯入'}</td></tr>
             <tr><th>已月結月份</th><td>{data.closes.map((c) => c.month).sort().join('、') || '無'}</td></tr>
           </tbody>

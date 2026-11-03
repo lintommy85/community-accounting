@@ -345,15 +345,15 @@ function DeletedUnits() {
     update((d) => ({ ...d, settings: { ...d.settings, units: d.settings.units.filter((u) => u.id !== id) } }), '永久刪除戶別', unitNo);
 
   return (
-    <Section title={`已刪除的戶別（${list.length}）`}>
+    <Section title={`已排除的戶別（${list.length}）`}>
       {list.length === 0 ? (
-        <p className="empty">沒有已刪除的戶別。在「戶別與月費」刪除的戶別會列在這裡，方便確認與加回。</p>
+        <p className="empty">沒有已排除的戶別。在「戶別與月費」排除、或匯入範本時勾選排除的戶別會列在這裡，方便確認與加回。</p>
       ) : (
         <>
-          <p className="hint">已刪除的戶別不列入每月應繳、欠費與銷帳，也不會被重新匯入的範本自動加回；按「加回」即恢復使用。</p>
+          <p className="hint">已排除的戶別不列入每月應繳、欠費與銷帳，之後匯入範本也會自動略過（匯入時也可以取消勾選排除）；按「加回」即恢復使用。</p>
           <div className="table-wrap short">
             <table>
-              <thead><tr><th>戶別代碼</th><th>所有權人</th><th>刪除時間</th><th className="num">繳費紀錄</th><th className="num">應繳紀錄</th><th></th></tr></thead>
+              <thead><tr><th>戶別代碼</th><th>所有權人</th><th>排除時間</th><th className="num">繳費紀錄</th><th className="num">應繳紀錄</th><th></th></tr></thead>
               <tbody>
                 {list.map((u) => {
                   const n = usage(u.unitNo);
