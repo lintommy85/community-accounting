@@ -6,7 +6,7 @@
 
 逐月銷帳 · 在途存款 · 收支報表 · 欠費催繳 · 零用金
 
-![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.4.0-2563eb) ![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows-0f172a) ![資料](https://img.shields.io/badge/%E8%B3%87%E6%96%99-%E5%8F%AA%E5%AD%98%E6%9C%AC%E6%A9%9F-16a34a)
+![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.5.0-2563eb) ![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows-0f172a) ![資料](https://img.shields.io/badge/%E8%B3%87%E6%96%99-%E5%8F%AA%E5%AD%98%E6%9C%AC%E6%A9%9F-16a34a)
 
 ![總覽](docs/images/01-dashboard.png)
 
@@ -101,7 +101,7 @@
 
 ## 開始使用
 
-1. 解壓縮 `社區帳務管理-v0.4.0.zip`，放到例如 `D:\社區帳務管理`（不要在壓縮檔裡直接執行）。
+1. 解壓縮 `社區帳務管理-v0.5.0.zip`，放到例如 `D:\社區帳務管理`（不要在壓縮檔裡直接執行）。
 2. 雙擊 `社區帳務管理.exe`。系統在背景執行並自動開啟瀏覽器，第一次開啟會播放使用說明動畫。
    - Windows 若顯示「Windows 已保護您的電腦」，請按「其他資訊」→「仍要執行」。
    - 防毒軟體若封鎖，請把整個資料夾加入例外清單。

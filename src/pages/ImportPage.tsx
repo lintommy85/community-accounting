@@ -1,16 +1,20 @@
 import { useMemo, useState } from 'react';
 import { Money, Section } from '../components/ui';
 import { FIELD_LABELS, newId, REQUIRED_FIELDS } from '../lib/defaults';
-import { monthOf } from '../lib/dates';
+import { monthOf, parsePeriods } from '../lib/dates';
 import BillImport from '../components/BillImport';
 import ImportReview, { ReviewDecision } from '../components/ImportReview';
 import { Go, useNavArg } from '../components/nav';
-import { AmountCheck, findAmountMismatches } from '../lib/allocation';
-import { MergeResult, mergeRows } from '../lib/ledger';
+import { allocateAll, AmountCheck, findAmountMismatches, normUnit } from '../lib/allocation';
+import { unitBaseline } from '../lib/fees';
+import { MergeResult, mergeRows, RowStatus } from '../lib/ledger';
 import { extractRows, gridToTable, guessMapping, missingRequired, detectHeaderRow, sheetMeta } from '../lib/parser';
 import { AppData, ColumnMapping, FieldKey } from '../lib/types';
 import { readWorkbook, SheetGrid } from '../lib/xlsxio';
 import { useStore } from '../store';
+
+const ROW_STATUS: Record<RowStatus, string> = { added: '新增', skipped: '不新增', duplicate: '已匯入過', updated: '已匯入過（會更新）' };
+const isNew = (st?: RowStatus) => st === 'added' || st === 'skipped';
 
 export default function ImportPage({ go }: { go: Go }) {
   const { data, update, isClosed } = useStore();
@@ -22,6 +26,9 @@ export default function ImportPage({ go }: { go: Go }) {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
+  const [skip, setSkip] = useState<Set<number>>(new Set());
+  const [rowFilter, setRowFilter] = useState<'all' | 'new' | 'dup' | 'maybe'>('all');
+  const [rowQ, setRowQ] = useState('');
   const navArg = useNavArg();
   const [tab, setTab] = useState<'deposit' | 'dues'>(navArg === 'dues' ? 'dues' : 'deposit');
   const [review, setReview] = useState<{ batchId: string; result: MergeResult; checks: AmountCheck[]; dryData: AppData } | null>(null);
@@ -40,8 +47,33 @@ export default function ImportPage({ go }: { go: Go }) {
       : undefined;
     const closedRows = rows.filter((r) => isClosed(r.paidDate));
     const openRows = rows.filter((r) => !isClosed(r.paidDate));
-    const dry = mergeRows(data.payments, openRows, 'preview');
+    const dry = mergeRows(data.payments, openRows, 'preview', skip);
     const mismatches = findAmountMismatches({ ...data, payments: dry.payments }, new Set(dry.payments.filter((p) => p.batchId === 'preview').map((p) => p.id))).length;
+    // 可能重複：同戶、同期別已有相同金額的繳費（收據單號不同），而且加起來超過這期帳單；分幾筆繳、合計沒超過的不算
+    const alloc = allocateAll(data);
+    const billOf = (unitNo: string, period: string) => {
+      const acc = alloc.byKey.get(normUnit(unitNo));
+      const months = parsePeriods(period);
+      if (!acc || !months.length) return 0;
+      const bill = months.reduce((t, m) => t + (acc.billByMonth.get(m) ?? 0), 0);
+      return bill || unitBaseline(acc.unit, data.settings.feePlans) * months.length;
+    };
+    const active = data.payments.filter((p) => !p.voided);
+    const seen = new Set(active.map((p) => `${normUnit(p.unitNo)}|${p.billPeriod}|${p.amount}`));
+    const sums = new Map<string, number>();
+    for (const p of active) sums.set(`${normUnit(p.unitNo)}|${p.billPeriod}`, (sums.get(`${normUnit(p.unitNo)}|${p.billPeriod}`) ?? 0) + p.amount);
+    const maybeDup = new Set<number>();
+    for (const r of openRows) {
+      const st = dry.status.get(r.rowNumber);
+      if (st !== 'added' && st !== 'skipped') continue;
+      const group = `${normUnit(r.unitNo)}|${r.billPeriod}`;
+      const k = `${group}|${r.amount}`;
+      const total = (sums.get(group) ?? 0) + r.amount;
+      const bill = billOf(r.unitNo, r.billPeriod);
+      if (seen.has(k) && (!bill || total > bill)) maybeDup.add(r.rowNumber);
+      seen.add(k);
+      sums.set(group, total);
+    }
     const months = Array.from(new Set(rows.map((r) => monthOf(r.paidDate)))).sort();
     return {
       rows,
@@ -53,11 +85,12 @@ export default function ImportPage({ go }: { go: Go }) {
       total: rows.reduce((s, r) => s + r.amount, 0),
       net,
       mismatches,
+      maybeDup,
       meta,
       payoutAccount,
       withDepositDate: rows.filter((r) => r.reportDepositDate).length,
     };
-  }, [table, sheet, headerRow, mapping, data.payments, data.settings, isClosed]);
+  }, [table, sheet, headerRow, mapping, data.payments, data.settings, isClosed, skip]);
 
   async function onFile(file: File | undefined) {
     if (!file) return;
@@ -70,6 +103,9 @@ export default function ImportPage({ go }: { go: Go }) {
       const hr = detectHeaderRow(wb[best].grid);
       const t = gridToTable(wb[best].sheetName, wb[best].grid, hr);
       setFileName(file.name);
+      setSkip(new Set());
+      setRowFilter('all');
+      setRowQ('');
       setSheets(wb);
       setSheetIdx(best);
       setHeaderRow(hr);
@@ -98,7 +134,7 @@ export default function ImportPage({ go }: { go: Go }) {
   function doImport() {
     if (!preview || !table) return;
     const batchId = newId('b_');
-    const result = mergeRows(data.payments, preview.openRows, batchId);
+    const result = mergeRows(data.payments, preview.openRows, batchId, skip);
     const newIds = new Set(result.payments.filter((p) => p.batchId === batchId).map((p) => p.id));
     const dryData = { ...data, payments: result.payments };
     const checks = findAmountMismatches(dryData, newIds);
@@ -133,15 +169,16 @@ export default function ImportPage({ go }: { go: Go }) {
             totalRows: table.rows.length,
             added: result.added,
             duplicates: result.duplicates,
-            skipped: preview.issues.length + preview.closedRows.length,
+            skipped: preview.issues.length + preview.closedRows.length + skip.size,
           },
         ],
       }),
       '匯入報表',
-      `${fileName}：新增 ${result.added}、重複 ${result.duplicates}、更新 ${result.updated}${decisions.size ? `、金額確認 ${decisions.size}（手動銷帳 ${manual}）` : ''}`,
+      `${fileName}：新增 ${result.added}、重複 ${result.duplicates}、更新 ${result.updated}${skip.size ? `、選擇不新增 ${skip.size}` : ''}${decisions.size ? `、金額確認 ${decisions.size}（手動銷帳 ${manual}）` : ''}`,
     );
     setDone(
       `匯入完成：新增 ${result.added} 筆，重複略過 ${result.duplicates} 筆，更新 ${result.updated} 筆（入帳日或金額有變動）` +
+        (skip.size ? `，選擇不新增 ${skip.size} 筆` : '') +
         (decisions.size ? `；${decisions.size} 筆金額與當期應繳不同已確認（手動指定銷帳 ${manual} 筆）。` : '。'),
     );
     setReview(null);
@@ -242,7 +279,11 @@ export default function ImportPage({ go }: { go: Go }) {
                     {preview.payoutAccount ? ` → 帳戶「${preview.payoutAccount.name}」` : '：不在「基本設定 → 銀行帳戶」中，請確認管理費轉入帳戶的完整帳號'}
                   </li>
                 )}
-                <li>新增 {preview.dry.added} 筆；已存在 {preview.dry.duplicates} 筆（略過）{preview.dry.updated ? `；其中 ${preview.dry.updated} 筆入帳日或金額有變動，會更新` : ''}</li>
+                <li>
+                  新增 {preview.dry.added} 筆；已匯入過 {preview.dry.duplicates} 筆（同一張收據單號，不會重複新增）
+                  {preview.dry.updated ? `；其中 ${preview.dry.updated} 筆入帳日或金額有變動，會更新` : ''}{skip.size ? `；選擇不新增 ${skip.size} 筆` : ''}
+                </li>
+                {preview.maybeDup.size > 0 && <li className="warn">{preview.maybeDup.size} 筆可能重複：同一戶、同期別已經有相同金額的繳費（收據單號不同），而且合計超過這期帳單。請在下表確認，重複的取消勾選「新增」；確實多繳的保留，會列入這戶的預收款。</li>}
                 <li>{preview.withDepositDate === preview.rows.length ? '全部都有入帳日' : `${preview.rows.length - preview.withDepositDate} 筆沒有入帳日，視為尚未入帳（在途存款）`}</li>
                 {earlyMonth && (
                   <li className="err">
@@ -260,23 +301,63 @@ export default function ImportPage({ go }: { go: Go }) {
                   </li>
                 )}
               </ul>
-              <div className="table-wrap">
+              <p className="hint">
+                逐筆確認：預設新增所有還沒匯入的款項；不要新增的取消勾選「新增」（例如重複上傳、或智生活重複列出的同一筆）。
+                已匯入過的款項（同一張收據單號）不會再新增。同一戶分好幾筆繳的，會全部新增並依序銷帳，超過應繳的部分列入這戶的預收款。
+              </p>
+              <div className="form-row">
+                {(['all', 'new', 'dup', 'maybe'] as const).map((f) => (
+                  <button key={f} className={rowFilter === f ? 'primary' : ''} onClick={() => setRowFilter(f)}>
+                    {f === 'all' ? `全部（${preview.openRows.length}）` : f === 'new' ? `新的款項（${preview.dry.added + skip.size}）` : f === 'dup' ? `已匯入過（${preview.dry.duplicates}）` : `可能重複（${preview.maybeDup.size}）`}
+                  </button>
+                ))}
+                <input placeholder="搜尋戶別或所有權人" value={rowQ} onChange={(e) => setRowQ(e.target.value)} />
+                <button onClick={() => setSkip(new Set())}>全部新增</button>
+                <button onClick={() => setSkip(new Set(preview.openRows.filter((r) => isNew(preview.dry.status.get(r.rowNumber))).map((r) => r.rowNumber)))}>全部不新增</button>
+              </div>
+              <div className="table-wrap short">
                 <table>
                   <thead>
-                    <tr><th>列</th><th>戶別</th><th>所有權人</th><th>期別</th><th>項目</th><th>繳費日</th><th>繳費方式</th><th className="num">金額</th><th className="num">手續費</th><th className="num">入帳金額</th><th>入帳日</th></tr>
+                    <tr><th>新增</th><th>狀態</th><th>列</th><th>戶別</th><th>所有權人</th><th>期別</th><th>項目</th><th>繳費日</th><th>繳費方式</th><th className="num">金額</th><th className="num">手續費</th><th className="num">入帳金額</th><th>入帳日</th></tr>
                   </thead>
                   <tbody>
-                    {preview.rows.slice(0, 50).map((r) => (
-                      <tr key={r.rowNumber}>
-                        <td>{r.rowNumber}</td><td>{r.unitNo}</td><td>{r.payerName}</td><td>{r.billPeriod}</td><td>{r.item}</td>
-                        <td>{r.paidDate}</td><td>{r.channel}</td>
-                        <td className="num"><Money value={r.amount} /></td><td className="num">{r.fee ? <Money value={r.fee} /> : ''}</td><td className="num"><Money value={r.depositAmount ?? r.amount - r.fee} /></td>
-                        <td>{r.reportDepositDate || <span className="tag warn">尚未入帳</span>}</td>
-                      </tr>
-                    ))}
+                    {preview.openRows
+                      .filter((r) => {
+                        const st = preview.dry.status.get(r.rowNumber);
+                        if (rowFilter === 'new') return isNew(st);
+                        if (rowFilter === 'dup') return !isNew(st);
+                        if (rowFilter === 'maybe') return preview.maybeDup.has(r.rowNumber);
+                        return true;
+                      })
+                      .filter((r) => !rowQ.trim() || `${r.unitNo} ${r.payerName}`.toUpperCase().includes(rowQ.trim().toUpperCase()))
+                      .map((r) => {
+                        const st = preview.dry.status.get(r.rowNumber);
+                        const maybe = preview.maybeDup.has(r.rowNumber);
+                        return (
+                          <tr key={r.rowNumber} className={st === 'skipped' ? 'muted-row' : maybe ? 'attention' : ''}>
+                            <td>
+                              {isNew(st) && (
+                                <input type="checkbox" aria-label={`新增第 ${r.rowNumber} 列`} checked={st !== 'skipped'} onChange={(e) => {
+                                  const next = new Set(skip);
+                                  if (e.target.checked) next.delete(r.rowNumber);
+                                  else next.add(r.rowNumber);
+                                  setSkip(next);
+                                }} />
+                              )}
+                            </td>
+                            <td>
+                              <span className={`tag ${st === 'added' ? 'ok' : st === 'updated' ? 'warn' : ''}`}>{ROW_STATUS[st ?? 'duplicate']}</span>
+                              {maybe && <span className="tag warn" title="同一戶、同期別已經有相同金額的繳費，而且合計超過這期帳單">可能重複</span>}
+                            </td>
+                            <td>{r.rowNumber}</td><td>{r.unitNo}</td><td>{r.payerName}</td><td>{r.billPeriod}</td><td>{r.item}</td>
+                            <td>{r.paidDate}</td><td>{r.channel}</td>
+                            <td className="num"><Money value={r.amount} /></td><td className="num">{r.fee ? <Money value={r.fee} /> : ''}</td><td className="num"><Money value={r.depositAmount ?? r.amount - r.fee} /></td>
+                            <td>{r.reportDepositDate || <span className="tag warn">尚未入帳</span>}</td>
+                          </tr>
+                        );
+                      })}
                   </tbody>
                 </table>
-                {preview.rows.length > 50 && <p className="hint">僅顯示前 50 筆。</p>}
               </div>
             </Section>
           )}

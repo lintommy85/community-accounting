@@ -209,3 +209,33 @@ describe('opening prepaid and unreconciled payments', () => {
     expect(advancesFromAllocations(allocateAll(d), d.payments, '2026-10', { confirmedOnly: true }).prepaid).toBe(4000);
   });
 });
+
+describe('amount check for payments split into several transfers', () => {
+  const ids = (d: ReturnType<typeof setup>) => new Set(d.payments.map((p) => p.id));
+
+  it('does not ask when the parts add up to the bill', () => {
+    const d = setup([pay('A1-3F', '2026-11-03', 1000, '115/11'), pay('A1-3F', '2026-11-04', 600, '115/11'), pay('A1-3F', '2026-11-05', 400, '115/11')]);
+    d.dues = d.dues.map((x) => ({ ...x, billAmount: x.amount }));
+    expect(findAmountMismatches(d, ids(d))).toEqual([]);
+  });
+
+  it('asks only about the part that goes over, or the last part when short', () => {
+    const over = setup([pay('A1-3F', '2026-11-03', 1000, '115/11'), pay('A1-3F', '2026-11-04', 1000, '115/11'), pay('A1-3F', '2026-11-05', 1500, '115/11')]);
+    over.dues = over.dues.map((x) => ({ ...x, billAmount: x.amount }));
+    expect(findAmountMismatches(over, ids(over)).map((c) => [c.payment.amount, c.expected, c.diff, c.others])).toEqual([[1500, 0, 1500, { count: 2, amount: 2000 }]]);
+    const short = setup([pay('A1-3F', '2026-11-03', 1000, '115/11'), pay('A1-3F', '2026-11-04', 500, '115/11')]);
+    short.dues = short.dues.map((x) => ({ ...x, billAmount: x.amount }));
+    expect(findAmountMismatches(short, ids(short)).map((c) => [c.payment.amount, c.expected, c.diff])).toEqual([[500, 1000, -500]]);
+  });
+
+  it('counts the part imported from an earlier report', () => {
+    const first = pay('A1-3F', '2026-11-03', 1200, '115/11');
+    const second = pay('A1-3F', '2026-11-10', 800, '115/11');
+    const d = setup([first, second]);
+    d.dues = d.dues.map((x) => ({ ...x, billAmount: x.amount }));
+    expect(findAmountMismatches(d, new Set([second.id]))).toEqual([]);
+    const again = pay('A1-3F', '2026-11-12', 2000, '115/11');
+    d.payments.push(again);
+    expect(findAmountMismatches(d, new Set([again.id])).map((c) => [c.expected, c.diff])).toEqual([[0, 2000]]);
+  });
+});

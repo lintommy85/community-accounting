@@ -110,7 +110,8 @@ export default function ImportReview({
             <tr>
               <th>帳單金額</th>
               <td>
-                {c.months.join('、')} {c.estimated ? `尚未匯入每月應繳，依基準估算 ${formatMoney(c.expected)} 元` : `帳單共 ${formatMoney(c.expected)} 元（含帳單內含逾期）`}
+                {c.months.join('、')} {c.estimated ? `尚未匯入每月應繳，依基準估算 ${formatMoney(c.bill)} 元` : `帳單共 ${formatMoney(c.bill)} 元（含帳單內含逾期）`}
+                {c.others.amount > 0 || c.others.count > 0 ? `，這期已銷 ${formatMoney(c.others.amount)} 元${c.others.count ? `（同期另有 ${c.others.count} 筆繳費）` : ''}，這筆還應繳 ${formatMoney(c.expected)} 元` : ''}
                 <span className={`tag ${c.diff > 0 ? 'ok' : 'warn'}`}>{c.diff > 0 ? `多繳 ${formatMoney(c.diff)}` : `少繳 ${formatMoney(-c.diff)}`}</span>
               </td>
             </tr>

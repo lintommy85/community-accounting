@@ -219,3 +219,26 @@ describe('account registers', () => {
     expect(nov.lines.map((l) => [l.date, l.kind, l.balance])).toEqual([['2026-11-02', 'expense', 7300], ['2026-11-04', 'deposit', 15300]]);
   });
 });
+
+describe('choosing which report rows to add', () => {
+  const row = (n: number, amount: number, receipt: string) => ({ rowNumber: n, unitNo: 'A1', payerName: '', billPeriod: '115/11', item: '管理費', paidDate: `2026-11-0${n}`, channel: 'ATM', amount, fee: 0, reportDepositDate: '', depositAmount: null, txnNo: receipt, status: '', note: '' });
+
+  it('adds split payments separately and never adds the same receipt twice', () => {
+    const rows = [row(1, 1000, 'R1'), row(2, 1000, 'R2'), row(3, 1000, 'R3')];
+    const first = mergeRows([], rows, 'b1');
+    expect([first.added, first.duplicates]).toEqual([3, 0]);
+    const again = mergeRows(first.payments, rows, 'b2');
+    expect([again.added, again.duplicates, again.payments.length]).toEqual([0, 3, 3]);
+    expect(Array.from(again.status.values())).toEqual(['duplicate', 'duplicate', 'duplicate']);
+  });
+
+  it('skips rows the user unticks and can add them from a later upload', () => {
+    const rows = [row(1, 1000, ''), row(2, 1000, '')];
+    rows[1].paidDate = rows[0].paidDate;
+    const first = mergeRows([], rows, 'b1', new Set([1]));
+    expect([first.added, first.status.get(1), first.status.get(2)]).toEqual([1, 'skipped', 'added']);
+    // 兩列內容完全相同：略過第一列後，第二列仍保有自己的辨識，重新上傳時只會補上第一列
+    const later = mergeRows(first.payments, rows, 'b2');
+    expect([later.added, later.status.get(1), later.status.get(2)]).toEqual([1, 'added', 'duplicate']);
+  });
+});

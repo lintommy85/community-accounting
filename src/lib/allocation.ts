@@ -436,8 +436,13 @@ export interface AmountCheck {
   payment: Payment;
   account: UnitAccount;
   months: string[];
+  /** 這筆繳費還應該繳多少：帳單金額扣掉同期其他繳費（已匯入的與這次較早的）。 */
   expected: number;
   diff: number;
+  /** 這期的帳單金額（或依基準估算）。 */
+  bill: number;
+  /** 同一戶同期別的其他繳費：已匯入的筆數加上這次較早的筆數與金額。 */
+  others: { count: number; amount: number };
   /** 這些月份還沒匯入每月應繳，帳單金額是依基準估算。 */
   estimated?: boolean;
   /** 金額剛好等於上個月（例如費率調整前）尚未繳清的帳單：要手動選擇銷上個月還是這個月。 */
@@ -445,30 +450,52 @@ export interface AmountCheck {
 }
 
 /**
- * 匯入時檢查：繳費金額與該期（帳單期別；沒有期別時為繳費月份）帳單金額不同的新款項。
- * 比較對象是帳單金額（本期應繳＋帳單內含逾期）；沒有建立應繳時以戶別基準比較；兩者都沒有就無法判斷，略過。
+ * 匯入時檢查：同一戶同期別（帳單期別；沒有期別時為繳費月份）的新款項合計與帳單金額不同時，標出多繳或少繳的那幾筆。
+ * 帳單金額是本期應繳＋帳單內含逾期，先扣掉已匯入的繳費（含預收款銷到這期的部分）；沒有建立應繳時以戶別基準比較；兩者都沒有就無法判斷，略過。
+ * 分好幾筆繳、合計剛好等於帳單的不用確認；合計不同時，只標出讓合計超過帳單的那幾筆，或少繳時的最後一筆。
  * 金額等於上個月未繳清的帳單時（跨月在途、費率調整前的帳），一併標出讓使用者選擇要銷哪個月。
  */
 export function findAmountMismatches(data: AppData, paymentIds: Set<string>): AmountCheck[] {
   const result = allocateAll({ ...data, payments: data.payments.filter((p) => !paymentIds.has(p.id)) });
-  const out: AmountCheck[] = [];
+  const monthsOf = (p: Payment) => {
+    const periods = parsePeriods(p.billPeriod);
+    return periods.length ? periods : [monthOf(p.paidDate)];
+  };
+  const groupKey = (p: Payment) => `${normUnit(p.unitNo)}|${monthsOf(p).join(',')}`;
+  const groups = new Map<string, Payment[]>();
   for (const p of data.payments) {
     if (!paymentIds.has(p.id) || p.voided || p.allocations || p.amount <= 0) continue;
-    const account = result.byKey.get(normUnit(p.unitNo));
+    (groups.get(groupKey(p)) ?? groups.set(groupKey(p), []).get(groupKey(p))!).push(p);
+  }
+  const out: AmountCheck[] = [];
+  for (const [key, list] of groups) {
+    const account = result.byKey.get(normUnit(list[0].unitNo));
     if (!account) continue;
-    const periods = parsePeriods(p.billPeriod);
-    const months = periods.length ? periods : [monthOf(p.paidDate)];
+    const months = monthsOf(list[0]);
     // 有匯入帳單就用帳單金額（年繳沖銷後可能是 0）；沒有帳單才用基準估算
     const billed = months.some((m) => account.billByMonth.has(m));
-    const expected = billed ? months.reduce((s, m) => s + (account.billByMonth.get(m) ?? 0), 0) : unitBaseline(account.unit, data.settings.feePlans) * months.length;
-    if ((!billed && !expected) || expected === p.amount) continue;
-    const pm = addMonths(months[0], -1);
-    const prevBill = account.billByMonth.get(pm) ?? 0;
-    const prevOpen = Math.max(0, dueFor(account, pm) - (account.paidByMonth.get(pm) ?? 0));
-    const prev = prevBill && prevOpen && (p.amount === prevBill || p.amount === prevOpen) ? { month: pm, bill: prevBill } : undefined;
-    out.push({ payment: p, account, months, expected, diff: p.amount - expected, estimated: !billed, prev });
+    const bill = billed ? months.reduce((s, m) => s + (account.billByMonth.get(m) ?? 0), 0) : unitBaseline(account.unit, data.settings.feePlans) * months.length;
+    if (!billed && !bill) continue;
+    const already = months.reduce((s, m) => s + (account.paidByMonth.get(m) ?? 0), 0);
+    const existing = data.payments.filter((x) => !paymentIds.has(x.id) && !x.voided && groupKey(x) === key).length;
+    const remaining = Math.max(0, bill - already);
+    list.sort((a, b) => a.paidDate.localeCompare(b.paidDate) || a.id.localeCompare(b.id));
+    if (list.reduce((t, p) => t + p.amount, 0) === remaining) continue;
+    let before = 0;
+    list.forEach((p, i) => {
+      const expected = Math.max(0, remaining - before);
+      const over = before + p.amount > remaining;
+      if ((over || i === list.length - 1) && p.amount !== expected) {
+        const pm = addMonths(months[0], -1);
+        const prevBill = account.billByMonth.get(pm) ?? 0;
+        const prevOpen = Math.max(0, dueFor(account, pm) - (account.paidByMonth.get(pm) ?? 0));
+        const prev = prevBill && prevOpen && (p.amount === prevBill || p.amount === prevOpen) ? { month: pm, bill: prevBill } : undefined;
+        out.push({ payment: p, account, months, expected, diff: p.amount - expected, bill, others: { count: existing + i, amount: already + before }, estimated: !billed, prev });
+      }
+      before += p.amount;
+    });
   }
-  return out.sort((a, b) => a.account.unit.unitNo.localeCompare(b.account.unit.unitNo, 'zh-Hant', { numeric: true }));
+  return out.sort((a, b) => a.account.unit.unitNo.localeCompare(b.account.unit.unitNo, 'zh-Hant', { numeric: true }) || a.payment.paidDate.localeCompare(b.payment.paidDate));
 }
 
 export interface PrepaidRow {

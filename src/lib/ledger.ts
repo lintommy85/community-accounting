@@ -23,19 +23,24 @@ export function netAmount(p: Payment): number {
 /** 撥款對帳與報表依報表上的「繳費方式」原文分組。 */
 export const channelLabel = (p: Payment) => p.channel.trim() || '未註明';
 
+export type RowStatus = 'added' | 'duplicate' | 'updated' | 'skipped';
+
 export interface MergeResult {
   payments: Payment[];
   added: number;
   duplicates: number;
   updated: number;
+  /** 每一列（rowNumber）的結果：新增、已匯入、已匯入但有更新、使用者選擇不新增。 */
+  status: Map<number, RowStatus>;
 }
 
 /**
  * 將解析後的列合併進既有繳費紀錄；入帳日一律採用報表上的入帳／撥款日，沒有的視為尚未入帳。
  * 有交易序號時以「序號＋門牌＋項目＋期別」辨識同一筆，重複匯入時金額、手續費、日期、繳費方式有變動才更新；
  * 沒有序號時以全部欄位辨識，重複匯入同一份報表不會重複入帳。之後的報表補上入帳日時會自動更新。
+ * skip 的列（使用者選擇不新增）不會新增，但仍計入同樣內容的出現次數，之後重新匯入時辨識結果不變。
  */
-export function mergeRows(existing: Payment[], rows: ParsedRow[], batchId: string): MergeResult {
+export function mergeRows(existing: Payment[], rows: ParsedRow[], batchId: string, skip: Set<number> = new Set()): MergeResult {
   const byId = new Map(existing.map((p) => [p.id, p]));
   const occurrences = new Map<string, number>();
   const out = existing.slice();
@@ -43,6 +48,7 @@ export function mergeRows(existing: Payment[], rows: ParsedRow[], batchId: strin
   let added = 0;
   let duplicates = 0;
   let updated = 0;
+  const status = new Map<number, RowStatus>();
   for (const r of rows) {
     const base = r.txnNo
       ? ['t', r.txnNo, normUnit(r.unitNo), r.item, r.billPeriod].join('|')
@@ -53,6 +59,7 @@ export function mergeRows(existing: Payment[], rows: ParsedRow[], batchId: strin
     const prev = byId.get(id);
     if (prev) {
       duplicates++;
+      status.set(r.rowNumber, 'duplicate');
       const depositAmount = r.depositAmount ?? undefined;
       const coreChanged =
         prev.amount !== r.amount || prev.fee !== r.fee || prev.paidDate !== r.paidDate || prev.channel !== r.channel || prev.depositAmount !== depositAmount;
@@ -71,10 +78,16 @@ export function mergeRows(existing: Payment[], rows: ParsedRow[], batchId: strin
           status: r.status,
         };
         updated++;
+        status.set(r.rowNumber, 'updated');
       } else if (depositChanged && !prev.depositConfirmed) {
         out[indexOf.get(id)!] = { ...prev, reportDepositDate: r.reportDepositDate, depositDate: r.reportDepositDate };
         updated++;
+        status.set(r.rowNumber, 'updated');
       }
+      continue;
+    }
+    if (skip.has(r.rowNumber)) {
+      status.set(r.rowNumber, 'skipped');
       continue;
     }
     const p: Payment = {
@@ -101,8 +114,9 @@ export function mergeRows(existing: Payment[], rows: ParsedRow[], batchId: strin
     indexOf.set(id, out.length);
     out.push(p);
     added++;
+    status.set(r.rowNumber, 'added');
   }
-  return { payments: out, added, duplicates, updated };
+  return { payments: out, added, duplicates, updated, status };
 }
 
 export const active = (ps: Payment[]) => ps.filter((p) => !p.voided);
