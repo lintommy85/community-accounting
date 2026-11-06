@@ -299,6 +299,8 @@ function PlanEditor({
     ...units.flatMap((u) => (u.extras ?? []).filter((e) => e.planId === p.id).map((e) => ({ u, qty: e.qty || 1 }))),
   ];
   const count = (id: string) => uses(plans.find((p) => p.id === id)!).length;
+  const totalQty = (p: FeePlan) => uses(p).reduce((sum, x) => sum + x.qty, 0);
+  const totalArea = (p: FeePlan) => Math.round(uses(p).reduce((sum, x) => sum + (x.u.area ?? 0) * x.qty, 0) * 100) / 100;
   const subtotal = (p: FeePlan) => uses(p).reduce((sum, x) => sum + planFee(p, x.u) * x.qty, 0);
   const noArea = (id: string) => uses(plans.find((p) => p.id === id)!).filter((x) => !x.u.area).length;
   const unitLabel = (p: FeePlan) => (p.basis === 'area' ? '元／坪' : '元／月');
@@ -316,12 +318,12 @@ function PlanEditor({
     <Section title={`費率方案（${plans.length} 個）`}>
       <p className="hint">
         定義各種金額，例如「一般住戶」「店面」，或「機車位清潔費」「汽車位清潔費」。金額可選「依坪數計算」設定每坪單價（每坪單價 × 坪數，四捨五入到元）。
-        下方每戶套用一個方案，另外可加收其他方案並設定數量（例如 2 個機車位）。
+        下方每戶套用一個方案，另外可加收其他方案並設定數量（例如 2 個機車位）。「套用戶數」是幾戶，「總數量」是數量加總（例如有 2 個車位的戶算 2），方便和實際車位數核對。
         基準只在匯入智生活帳單時拿來比對（把帳單拆成本期應繳與帳單內含的逾期）；修改金額只影響之後匯入的月份，已匯入的月份不受影響。
       </p>
       {plans.length > 0 && (
         <table>
-          <thead><tr><th>方案名稱</th><th>計算方式</th><th className="num">金額／單價</th><th className="num">套用戶數</th><th className="num">每月小計</th><th></th></tr></thead>
+          <thead><tr><th>方案名稱</th><th>計算方式</th><th className="num">金額／單價</th><th className="num">套用戶數</th><th className="num" title="每戶的數量加總，例如有 2 個車位的戶算 2；依坪數的方案為坪數加總">總數量</th><th className="num">每月小計</th><th></th></tr></thead>
           <tbody>
             {plans.map((p) => (
               <tr key={p.id}>
@@ -348,6 +350,7 @@ function PlanEditor({
                   <button className="link" onClick={() => onFilter(p.id)}>{count(p.id)} 戶</button>
                   {p.basis === 'area' && noArea(p.id) > 0 && <span className="tag warn" title="這些戶別沒有坪數，月費為 0">{noArea(p.id)} 戶缺坪數</span>}
                 </td>
+                <td className="num">{p.basis === 'area' ? `${totalArea(p).toLocaleString('zh-TW')} 坪` : `${totalQty(p).toLocaleString('zh-TW')} 個`}</td>
                 <td className="num"><Money value={subtotal(p)} /></td>
                 <td><button className="link danger" onClick={() => confirm(`刪除方案「${p.name}」？套用的戶別會保留目前金額，改為個別金額。`) && onSave((st) => removePlan(st, p.id), '刪除費率方案', p.name)}>刪除</button></td>
               </tr>

@@ -16,8 +16,17 @@ export const PREPAID_ITEM = '預繳沖銷';
 /** 系統沒有這戶的預繳款（例如啟用本系統前預繳）時，沖銷照帳單減少應繳。 */
 export const PREPAID_BEFORE_ITEM = '預繳沖銷（啟用前預繳）';
 
-/** 去掉智生活項目名稱前的月份，例如「11月坪數費」→「坪數費」、「10月未繳管理費」→「未繳管理費」。 */
-export const billItemName = (item: string) => item.replace(/^\s*\d{1,2}\s*月\s*/, '').trim() || item.trim();
+/** 去掉智生活項目名稱前的年月，例如「11月坪數費」→「坪數費」、「115年1~12月管理費」→「管理費」、「10月未繳管理費」→「未繳管理費」。 */
+export const billItemName = (item: string) => item.replace(/^\s*(\d{2,3}\s*年\s*)?\d{1,2}\s*([-~～至到]\s*\d{1,2}\s*)?月(份)?\s*/, '').trim() || item.trim();
+
+/** 項目名稱寫的月份區間涵蓋幾個月，例如「1~12月管理費」→ 12、「11-1月」→ 3；沒有區間回傳 0。 */
+export function itemMonthSpan(item: string): number {
+  const m = item.match(/(\d{1,2})\s*[-~～至到]\s*(\d{1,2})\s*月/);
+  if (!m) return 0;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  if (a < 1 || a > 12 || b < 1 || b > 12) return 0;
+  return ((b - a + 12) % 12) + 1;
+}
 
 /** 還沒對應的帳單項目的建議：名稱相同的繳費項目、逾期、照帳單；猜不到回傳空字串。 */
 export function suggestBillItem(name: string, feeItems: string[]): string {
@@ -36,7 +45,7 @@ export function resolveBillItem(name: string, settings: Settings): string | unde
   return feeItemNames(settings).includes(name) ? name : undefined;
 }
 
-export type BillFlag = 'noBase' | 'offCycle' | 'below' | 'lessArrears' | 'prior';
+export type BillFlag = 'noBase' | 'unset' | 'offCycle' | 'span' | 'below' | 'lessArrears' | 'prior';
 
 export interface BillSplit {
   unitNo: string;
@@ -83,6 +92,21 @@ export interface ItemDiff {
 
 export type DiffDecision = 'update' | 'keep';
 
+/** 月繳戶的帳單看起來涵蓋好幾個月（金額是基準的整數倍，或項目寫了月份區間）：要選擇拆成幾個月或只算這個月。 */
+export interface SpanCandidate {
+  key: string;
+  unitNo: string;
+  owner: string;
+  month: string;
+  months: number;
+  bill: number;
+  /** 每月基準（繳費項目合計）。 */
+  monthly: number;
+  reason: 'amount' | 'name';
+}
+
+export type SpanDecision = 'split' | 'single';
+
 export interface BillPlan {
   /** 帳單上還沒對應到基準費率的項目（去掉月份前綴後的名稱）；有的話不能匯入。 */
   unmapped: string[];
@@ -92,6 +116,10 @@ export interface BillPlan {
   billed: Set<string>;
   /** 選擇「更新基準」後的各戶每月基準：戶別 key → 項目 → 每月金額。 */
   baselineUpdates: Map<string, Map<string, number>>;
+  /** 看起來跨好幾個月的帳單，選好之前這戶這張帳單不會匯入。 */
+  spans: SpanCandidate[];
+  /** 選「拆成 N 個月」的戶別：匯入後改成這個繳費週期（從帳單月份起）。 */
+  cycleUpdates: Map<string, { cycle: number; start: number }>;
 }
 
 /** 帳單月份之前的系統欠款（只看帳單月份前已繳的款項，不含由這個月以後帳單拆出的應繳）。 */
@@ -131,11 +159,11 @@ export function frozenBase(dues: Due[], key: string, month: string): { items: Ma
 export function planBillImport(
   data: AppData,
   rows: DueRow[],
-  opts: { rebase?: boolean; decisions?: Map<string, DiffDecision> } = {},
+  opts: { rebase?: boolean; decisions?: Map<string, DiffDecision>; spanDecisions?: Map<string, SpanDecision> } = {},
 ): BillPlan {
   const { settings } = data;
   const plans = settings.feePlans;
-  const empty = (): BillPlan => ({ unmapped: [], diffs: [], rows: [], splits: [], billed: new Set(), baselineUpdates: new Map() });
+  const empty = (): BillPlan => ({ unmapped: [], diffs: [], rows: [], splits: [], billed: new Set(), baselineUpdates: new Map(), spans: [], cycleUpdates: new Map() });
   const target = new Map<string, string | undefined>();
   for (const r of rows) {
     const name = billItemName(r.item);
@@ -174,7 +202,7 @@ export function planBillImport(
     const key = normUnit(unitNo);
     const unit = units.get(key);
     const frozen = opts.rebase ? null : frozenBase(data.dues, key, month);
-    const cycle = frozen?.cycle ?? unit?.cycle ?? 1;
+    let cycle = frozen?.cycle ?? unit?.cycle ?? 1;
     const split: BillSplit = { unitNo, owner, month, cycle, bill: list.reduce((t, r) => t + r.amount, 0), base: 0, frozen: !!frozen, carried: 0, arrears: 0, prior: 0, prepaid: 0, prepaidBefore: 0, prepaidBalance: 0, autoPrepaid: 0, autoBalance: 0, flags: [] };
     plan.splits.push(split);
     if (!unit) {
@@ -184,6 +212,33 @@ export function planBillImport(
     if (!frozen && !isCycleStart(unit, month)) {
       split.flags.push('offCycle');
       continue;
+    }
+    // 這戶還沒設定基準（每月基準 0）：不用帳單金額建立基準，這次不匯入，請先套用方案或輸入個別金額
+    if (!frozen && !Array.from(unitBaselines(unit, plans).values()).some((v) => v)) {
+      split.flags.push('unset');
+      continue;
+    }
+    if (!frozen && cycle === 1) {
+      // 月繳戶的帳單金額剛好是基準的 2、3、6、12 倍，或項目寫了月份區間：可能是一次開好幾個月的帳單
+      const monthly = Array.from(unitBaselines(unit, plans).values()).reduce((t, v) => t + v, 0);
+      const feeTotal = list.filter((r) => { const t = target.get(billItemName(r.item)); return t !== BILL_ARREARS && t !== BILL_PREPAID && t !== BILL_ASIS; }).reduce((t, r) => t + r.amount, 0);
+      const byName = Math.max(0, ...list.map((r) => itemMonthSpan(r.item)));
+      const byAmount = monthly > 0 && feeTotal > monthly && feeTotal % monthly === 0 ? feeTotal / monthly : 0;
+      const n = [byName, byAmount].find((x) => [2, 3, 6, 12].includes(x)) ?? 0;
+      if (n) {
+        const sk = `${key}|${month}`;
+        const choice = opts.spanDecisions?.get(sk);
+        plan.spans.push({ key: sk, unitNo, owner, month, months: n, bill: feeTotal, monthly, reason: byName === n ? 'name' : 'amount' });
+        if (!choice) {
+          split.flags.push('span');
+          continue;
+        }
+        if (choice === 'split') {
+          cycle = n;
+          split.cycle = n;
+          plan.cycleUpdates.set(key, { cycle: n, start: Number(month.slice(5)) });
+        }
+      }
     }
 
     const fee = new Map<string, number>();
@@ -266,6 +321,10 @@ export function planBillImport(
   }
   return plan;
 }
+
+/** 選「拆成 N 個月」的戶別改成對應的繳費週期（從帳單月份起）。 */
+export const applyCycleUpdates = (units: Unit[], updates: BillPlan['cycleUpdates']): Unit[] =>
+  updates.size ? units.map((u) => { const c = updates.get(normUnit(u.unitNo)); return c && !u.deletedAt ? { ...u, cycle: c.cycle, cycleStart: c.start } : u; }) : units;
 
 /** 套用「更新基準」的選擇到戶別設定（只在匯入時才會改基準）。 */
 export function applyBaselineUpdates(settings: Settings, updates: Map<string, Map<string, number>>): Unit[] {

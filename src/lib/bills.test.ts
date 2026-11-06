@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { advancesFromAllocations, allocateAll, findAmountMismatches, prepaidLedger } from './allocation';
-import { applyBaselineUpdates, ARREARS_ITEM, BILL_ARREARS, BILL_ASIS, BILL_PREPAID, billItemName, DiffDecision, planBillImport, suggestBillItem } from './bills';
+import { applyBaselineUpdates, applyCycleUpdates, itemMonthSpan, SpanDecision, ARREARS_ITEM, BILL_ARREARS, BILL_ASIS, BILL_PREPAID, billItemName, DiffDecision, planBillImport, suggestBillItem } from './bills';
 import { emptyData } from './defaults';
 import { applyDueChanges, diffDues, DueRow } from './dues';
 import { setUnitItemBaseline, unitBaselines } from './fees';
@@ -26,8 +26,8 @@ function setup(): AppData {
   return d;
 }
 
-function importBills(d: AppData, rows: DueRow[], decisions?: Map<string, DiffDecision>, rebase = false) {
-  const plan = planBillImport(d, rows, { decisions, rebase });
+function importBills(d: AppData, rows: DueRow[], decisions?: Map<string, DiffDecision>, rebase = false, spanDecisions?: Map<string, SpanDecision>) {
+  const plan = planBillImport(d, rows, { decisions, rebase, spanDecisions });
   const changes = diffDues(d.dues, plan.rows, plan.billed);
   return { plan, changes, dues: applyDueChanges(d.dues, changes) };
 }
@@ -205,9 +205,44 @@ describe('splitting 智生活 bills against the baseline', () => {
     const rows = [bill('A', 2676), bill('A', -2676, '年繳沖銷')];
     const keep = new Map<string, DiffDecision>([['A|2026-11|管理費', 'keep']]);
     const { plan, dues } = importBills(d, rows, keep);
-    expect(plan.splits[0]).toMatchObject({ bill: 0, carried: 0, prior: 0 });
+    expect(plan.splits[0]).toMatchObject({ bill: 0, carried: 0, prior: 0, flags: ['unset'] });
     expect(dues.filter((x) => x.unitNo === 'A').reduce((t, x) => t + x.amount, 0)).toBe(0);
     expect(dues.some((x) => x.item === '前期欠款')).toBe(false);
+  });
+
+  it('spots a bill that covers several months for a monthly household and splits it when chosen', () => {
+    const d = setup();
+    d.dues = [];
+    d.payments = [];
+    const rows = [bill('A', 24000, '1~12月管理費', '2026-01')];
+    const pending = planBillImport(d, rows);
+    expect(pending.spans.map((x) => [x.unitNo, x.months, x.reason, x.bill, x.monthly])).toEqual([['A', 12, 'name', 24000, 2000]]);
+    expect([pending.rows.length, pending.diffs.length, pending.splits[0].flags]).toEqual([0, 0, ['span']]);
+    const split = importBills(d, rows, undefined, false, new Map([['A|2026-01', 'split']]));
+    expect(split.plan.diffs).toEqual([]);
+    expect(new Set(split.dues.map((x) => x.month)).size).toBe(12);
+    expect(split.plan.cycleUpdates.get('A')).toEqual({ cycle: 12, start: 1 });
+    expect(applyCycleUpdates(d.settings.units, split.plan.cycleUpdates)[0]).toMatchObject({ cycle: 12, cycleStart: 1 });
+    const single = planBillImport(d, rows, { spanDecisions: new Map([['A|2026-01', 'single']]) });
+    expect(single.diffs.map((x) => [x.base, x.bill])).toEqual([[2000, 24000]]);
+    // 沒寫月份區間，只看金額是基準的整數倍（汽車位清潔費一起算）
+    const b = planBillImport(d, [bill('B', 6000, '11月管理費'), bill('B', 1500, '11月汽車位清潔費')]);
+    expect(b.spans.map((x) => [x.months, x.reason])).toEqual([[3, 'amount']]);
+  });
+
+  it('does not build a baseline from the bill for a household whose baseline is not set', () => {
+    const d = setup();
+    d.settings.units[0].monthlyFee = 0;
+    const { plan, dues } = importBills(d, [bill('A', 2676), bill('B', 2000), bill('B', 500, '11月汽車位清潔費')]);
+    expect(plan.splits.find((x) => x.unitNo === 'A')!.flags).toEqual(['unset']);
+    expect([plan.diffs.length, plan.baselineUpdates.size]).toEqual([0, 0]);
+    expect(dues.some((x) => x.unitNo === 'A' && x.month === '2026-11')).toBe(false);
+    expect(dues.filter((x) => x.unitNo === 'B' && x.month === '2026-11').reduce((t, x) => t + x.amount, 0)).toBe(2500);
+  });
+
+  it('strips year and month ranges from bill item names', () => {
+    expect(['115年11月坪數費', '1-12月管理費', '115年1~12月管理費', '11月份機車位清潔費'].map(billItemName)).toEqual(['坪數費', '管理費', '管理費', '機車位清潔費']);
+    expect(['1~12月管理費', '11-1月管理費', '管理費'].map(itemMonthSpan)).toEqual([12, 3, 0]);
   });
 
   it('keeps the baseline used when a month was imported; later rate changes only affect new months', () => {

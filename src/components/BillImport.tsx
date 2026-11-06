@@ -2,12 +2,14 @@ import { useMemo, useState } from 'react';
 import { normUnit } from '../lib/allocation';
 import {
   applyBaselineUpdates,
+  applyCycleUpdates,
   BILL_ARREARS,
   BILL_ASIS,
   BILL_PREPAID,
   BillSplit,
   billItemName,
   DiffDecision,
+  SpanDecision,
   planBillImport,
   suggestBillItem,
 } from '../lib/bills';
@@ -70,8 +72,10 @@ export default function BillImport({ go }: { go?: Go }) {
   const [rebase, setRebase] = useState(false);
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [decisions, setDecisions] = useState<Map<string, DiffDecision>>(new Map());
+  const [spanDecisions, setSpanDecisions] = useState<Map<string, SpanDecision>>(new Map());
   const [diffItem, setDiffItem] = useState('');
   const [msg, setMsg] = useState('');
+  const [askPrepaid, setAskPrepaid] = useState(false);
 
   const sheet = sheets[sheetIdx];
   const table = useMemo(() => (sheet ? billTable(sheet.sheetName, sheet.grid, headerRow) : null), [sheet, headerRow]);
@@ -88,6 +92,8 @@ export default function BillImport({ go }: { go?: Go }) {
   }, [table, wide, mapping, fallbackMonth, missing.length]);
 
   const firstTime = activeUnits(s.units).length === 0;
+  // 第一次建立每月應繳：先問有沒有啟用前的預收款要輸入，帳單上的沖銷才會從預收款扣除
+  const firstDues = !firstTime && data.dues.length === 0 && !s.units.some((u) => (u.openingPrepaid ?? 0) > 0);
   const unitPlan = useMemo(() => (parsed ? planUnitImport(s.units, parsed.units, excludes) : null), [parsed, s.units, excludes]);
   const skipKeys = useMemo(() => (unitPlan ? excludedKeys(s.units, unitPlan) : new Set<string>()), [s.units, unitPlan]);
   const billRows = useMemo(() => (parsed ? parsed.rows.filter((r) => !skipKeys.has(normUnit(r.unitNo))) : []), [parsed, skipKeys]);
@@ -105,7 +111,7 @@ export default function BillImport({ go }: { go?: Go }) {
     const units = unitPlan ? applyUnitImport(s.units, unitPlan, new Set(), () => '').slice(0, s.units.length) : s.units;
     return { ...data, settings: { ...data.settings, units, ...(newStart ? { billingStartMonth: newStart } : {}) } };
   }, [data, s.units, unitPlan, newStart]);
-  const plan = useMemo(() => (parsed ? planBillImport(planData, billRows, { rebase, decisions }) : null), [parsed, planData, billRows, rebase, decisions]);
+  const plan = useMemo(() => (parsed ? planBillImport(planData, billRows, { rebase, decisions, spanDecisions }) : null), [parsed, planData, billRows, rebase, decisions, spanDecisions]);
   const changes = useMemo(() => (plan && !plan.unmapped.length ? diffDues(data.dues, plan.rows, plan.billed) : []), [plan, data.dues]);
   const flagged = (f: BillSplit['flags'][number]) => (plan?.splits ?? []).filter((sp) => sp.flags.includes(f));
   const count = (st: DueChangeStatus) => changes.filter((c) => c.status === st).length;
@@ -115,6 +121,14 @@ export default function BillImport({ go }: { go?: Go }) {
   const feeItems = feeItemNames(s);
   const diffs = plan?.diffs ?? [];
   const undecided = diffs.filter((d) => !decisions.has(d.key));
+  const spans = plan?.spans ?? [];
+  const spanUndecided = spans.filter((sp) => !spanDecisions.has(sp.key));
+  const decideSpans = (keys: string[], v: SpanDecision) => {
+    const next = new Map(spanDecisions);
+    for (const k of keys) next.set(k, v);
+    setSpanDecisions(next);
+    setDecisions(new Map());
+  };
   const diffItems = Array.from(new Set(diffs.map((d) => d.item)));
   const shownDiffs = diffs.filter((d) => !diffItem || d.item === diffItem);
   const billMode = useMemo(() => {
@@ -135,7 +149,7 @@ export default function BillImport({ go }: { go?: Go }) {
     return m;
   }, [changes]);
   const groups = (plan?.splits ?? [])
-    .filter((sp) => !sp.flags.includes('noBase') && !sp.flags.includes('offCycle'))
+    .filter((sp) => !sp.flags.some((f) => f === 'noBase' || f === 'unset' || f === 'offCycle' || f === 'span'))
     .map((sp) => ({ sp, status: groupStatus.get(`${normUnit(sp.unitNo)}|${sp.month}`) ?? 'same' }));
   const shownGroups = groups.filter((g) => showSame || g.status !== 'same');
 
@@ -146,6 +160,7 @@ export default function BillImport({ go }: { go?: Go }) {
     setUnitQ('');
     setPicks({});
     setDecisions(new Map());
+    setSpanDecisions(new Map());
     setDiffItem('');
     setRebase(false);
   }
@@ -190,7 +205,7 @@ export default function BillImport({ go }: { go?: Go }) {
   /** withDues：同時匯入應繳；否則只匯入戶別與所有權人（第一次建立戶別、或帳單項目還沒對應時）。 */
   function apply(withDues: boolean) {
     if (!parsed || !unitPlan || ownerUndecided.length) return;
-    if (withDues && (!plan || plan.unmapped.length || undecided.length)) return;
+    if (withDues && (!plan || plan.unmapped.length || undecided.length || spanUndecided.length)) return;
     const added = count('new');
     const changed = count('changed');
     const updatedBase = withDues && plan ? plan.baselineUpdates.size : 0;
@@ -200,7 +215,7 @@ export default function BillImport({ go }: { go?: Go }) {
     update(
       (d) => {
         let units = applyUnitImport(d.settings.units, up, changeOwner, () => newId('u_'), at);
-        if (withDues && plan) units = applyBaselineUpdates({ ...d.settings, units }, plan.baselineUpdates);
+        if (withDues && plan) units = applyCycleUpdates(applyBaselineUpdates({ ...d.settings, units }, plan.baselineUpdates), plan.cycleUpdates);
         units = sortUnits(units);
         return {
           ...d,
@@ -452,11 +467,56 @@ export default function BillImport({ go }: { go?: Go }) {
                   </li>
                 )}
                 {flagged('offCycle').length > 0 && <li className="err">{flagged('offCycle').length} 戶這個月不是繳費週期的第一個月，不會匯入，請確認「基準與費率」的繳費週期：{flagged('offCycle').slice(0, 6).map((sp) => sp.unitNo).join('、')}{flagged('offCycle').length > 6 ? '…' : ''}</li>}
+                {flagged('unset').length > 0 && (
+                  <li className="err">
+                    {flagged('unset').length} 戶還沒設定基準（每月基準 0），這次不匯入應繳，也不會用帳單金額建立基準：
+                    {flagged('unset').slice(0, 6).map((sp) => sp.unitNo).join('、')}{flagged('unset').length > 6 ? '…' : ''}。
+                    請先到「戶別與月費 → 基準與費率」套用費率方案（或輸入個別金額），再匯入一次。
+                  </li>
+                )}
                 {flagged('noBase').length > 0 && <li className="warn">{flagged('noBase').length} 戶是新戶別，這次只建立戶別、不匯入應繳（到「基準與費率」設定基準後再匯入一次）</li>}
                 {parsed.issues.length > 0 && (
                   <li className="warn">{parsed.issues.length} 列未匯入：{parsed.issues.slice(0, 6).map((i) => `第${i.rowNumber}列 ${i.reason}`).join('；')}{parsed.issues.length > 6 ? '…' : ''}</li>
                 )}
               </ul>
+
+              {spans.length > 0 && (
+                <section className={`banner block ${spanUndecided.length ? 'warn' : 'ok'}`}>
+                  <strong>{spans.length} 戶的帳單看起來一次開了好幾個月{spanUndecided.length ? `，還有 ${spanUndecided.length} 戶沒選擇，選完才能匯入` : '，已全部選擇'}</strong>
+                  <span>
+                    這些戶別目前是月繳，但帳單金額剛好是每月基準的整數倍，或項目寫了月份區間（例如「1~12月管理費」）。
+                    「拆成 N 個月」：把帳單拆到從帳單月份起的 N 個月，並把這戶的繳費週期改成對應的週期（之後同樣的帳單會自動拆）。
+                    「只算這個月」：當成這個月一張帳單，再和每月基準比對。
+                  </span>
+                  <div className="form-row">
+                    <button onClick={() => decideSpans(spans.map((sp) => sp.key), 'split')}>全部拆成多個月</button>
+                    <button onClick={() => decideSpans(spans.map((sp) => sp.key), 'single')}>全部只算這個月</button>
+                  </div>
+                  <div className="table-wrap short">
+                    <table>
+                      <thead><tr><th>戶別</th><th>所有權人</th><th>帳單月份</th><th className="num">帳單繳費項目</th><th className="num">每月基準</th><th>判斷依據</th><th>選擇</th></tr></thead>
+                      <tbody>
+                        {spans.map((sp) => {
+                          const v = spanDecisions.get(sp.key);
+                          const label = CYCLES.find((c) => c.months === sp.months)?.label ?? `${sp.months} 個月`;
+                          return (
+                            <tr key={sp.key} className={v ? '' : 'attention'}>
+                              <td>{sp.unitNo}</td><td>{sp.owner}</td><td>{sp.month}</td>
+                              <td className="num"><Money value={sp.bill} /></td>
+                              <td className="num"><Money value={sp.monthly} /></td>
+                              <td>{sp.reason === 'name' ? `項目寫了 ${sp.months} 個月的區間` : `金額是基準的 ${sp.months} 倍`}</td>
+                              <td>
+                                <label className="check inline"><input type="radio" name={`s${sp.key}`} checked={v === 'split'} onChange={() => decideSpans([sp.key], 'split')} /> 拆成 {sp.months} 個月（改為{label}，{Number(sp.month.slice(5))} 月起）</label>
+                                <label className="check inline"><input type="radio" name={`s${sp.key}`} checked={v === 'single'} onChange={() => decideSpans([sp.key], 'single')} /> 只算這個月</label>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              )}
 
               {diffs.length > 0 && (
                 <section className={`banner block ${undecided.length ? 'warn' : 'ok'}`}>
@@ -508,9 +568,10 @@ export default function BillImport({ go }: { go?: Go }) {
               )}
 
               <div className="form-row">
-                <button className="primary" disabled={(!pending && !unitChanges) || undecided.length > 0 || ownerUndecided.length > 0} onClick={() => apply(true)}>
+                <button className="primary" disabled={(!pending && !unitChanges) || undecided.length > 0 || spanUndecided.length > 0 || ownerUndecided.length > 0} onClick={() => (firstDues ? setAskPrepaid(true) : apply(true))}>
                   確認匯入{changes.length ? `（應繳新增 ${count('new')}、更新 ${count('changed')}${count('removed') ? `、刪除 ${count('removed')}` : ''}）` : ''}{unitChanges ? `（戶別 ${unitChanges} 戶）` : ''}{plan.baselineUpdates.size ? `（更新基準 ${plan.baselineUpdates.size} 戶）` : ''}
                 </button>
+                {spanUndecided.length > 0 && <span className="err">還有 {spanUndecided.length} 戶跨月帳單尚未選擇</span>}
                 {undecided.length > 0 && <span className="err">還有 {undecided.length} 筆和基準不同、尚未選擇</span>}
                 {ownerUndecided.length > 0 && <span className="err">還有 {ownerUndecided.length} 戶所有權人不同、尚未選擇</span>}
                 {plan.splits.some((sp) => sp.frozen) && (
@@ -543,6 +604,21 @@ export default function BillImport({ go }: { go?: Go }) {
             </>
           )}
         </>
+      )}
+      {askPrepaid && (
+        <div className="modal-backdrop" onClick={() => setAskPrepaid(false)}>
+          <div className="modal" role="dialog" aria-label="期初預收款" onClick={(e) => e.stopPropagation()}>
+            <h2>要先建立期初預收款嗎？</h2>
+            <p>這是第一次匯入每月應繳。啟用本系統前，如果有住戶已經年繳、半年繳或預繳，還沒沖完的金額要先輸入成「期初預收款」：
+              帳單上的沖銷（例如年繳沖銷）才會從這戶的預收款扣除，預收款項銷帳紀錄也才算得對。</p>
+            <p className="hint">選「要建立」會前往「戶別與月費 → 期初預收款」，輸入完再回來匯入同一份檔案。</p>
+            <div className="form-row modal-actions">
+              <button onClick={() => setAskPrepaid(false)}>取消</button>
+              <button onClick={() => { setAskPrepaid(false); apply(true); }}>不需要，直接匯入</button>
+              <button className="primary" onClick={() => { setAskPrepaid(false); go?.('units', 'prepaid'); }}>要建立期初預收款</button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
