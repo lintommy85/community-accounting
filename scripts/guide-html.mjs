@@ -58,39 +58,50 @@ export function guideHtml(txt, version) {
     .join('\n');
   const toc = sections.map((s, i) => `<a href="#s${i + 1}">${esc(s.title)}</a>`).join('');
   return `<!doctype html>
-<html lang="zh-Hant">
+<html lang="zh-Hant" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
 <style>
-:root { --ink: #1f2937; --muted: #6b7280; --line: #e5e7eb; --accent: #2563eb; --soft: #eff4ff; --bg: #f6f7f9; }
+:root { --ink: #1b2027; --muted: #6b7480; --line: #e7e9ed; --accent: #21b25b; --accent-strong: #15924a; --soft: #e8f7ee; --bg: #f5f6f8; --panel: #fff; --pre: #0f172a; color-scheme: light; }
+:root[data-theme="dark"] { --ink: #e5e8ec; --muted: #9aa3ae; --line: #2a3039; --accent: #2cbf66; --accent-strong: #4fd88a; --soft: rgba(44, 191, 102, 0.15); --bg: #0f1216; --panel: #171b21; --pre: #0b0d10; color-scheme: dark; }
 * { box-sizing: border-box; }
-body { margin: 0; font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif; color: var(--ink); background: var(--bg); line-height: 1.75; font-size: 16px; }
-header { background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff; padding: 36px 24px 28px; }
-header h1 { margin: 0 auto; max-width: 980px; font-size: 28px; }
-header p { margin: 6px auto 0; max-width: 980px; opacity: 0.85; }
-.wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 60px; display: grid; grid-template-columns: 220px 1fr; gap: 24px; }
-nav { position: sticky; top: 16px; align-self: start; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
-nav a { display: block; padding: 5px 10px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 14px; }
-nav a:hover { background: var(--soft); color: var(--accent); }
-section { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; }
+body { margin: 0; font-family: "Pretendard", "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif; color: var(--ink); background: var(--bg); line-height: 1.75; font-size: 16px; -webkit-font-smoothing: antialiased; }
+header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 28px 24px 22px; }
+.head { max-width: 1040px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+header h1 { margin: 0; font-size: 26px; display: flex; align-items: center; gap: 12px; }
+header h1::before { content: ""; width: 12px; height: 28px; border-radius: 6px; background: var(--accent); }
+header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+.theme { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; background: var(--panel); }
+.theme button { font: inherit; font-size: 13px; border: 0; background: none; color: var(--muted); padding: 4px 14px; border-radius: 999px; cursor: pointer; }
+.theme button.on { background: var(--soft); color: var(--accent-strong); font-weight: 700; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 24px 16px 60px; display: grid; grid-template-columns: 230px 1fr; gap: 24px; }
+nav { position: sticky; top: 16px; align-self: start; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px; max-height: calc(100vh - 32px); overflow-y: auto; }
+nav a { display: block; padding: 6px 10px; border-radius: 9px; color: var(--ink); text-decoration: none; font-size: 14px; }
+nav a:hover { background: var(--soft); color: var(--accent-strong); }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; margin-bottom: 16px; }
 h2 { margin: 0 0 10px; font-size: 20px; display: flex; align-items: center; gap: 10px; }
-h2 .num { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 14px; }
+h2 .num { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: var(--soft); color: var(--accent-strong); font-size: 14px; }
 ol, ul { margin: 6px 0; padding-left: 1.6em; }
 li { margin: 4px 0; }
+li::marker { color: var(--accent); }
 li > ul, li > ol { margin-top: 2px; }
 ul.circled { list-style: none; padding-left: 1.6em; }
 ul.circled > li::before { content: attr(data-mark); margin-left: -1.4em; width: 1.4em; display: inline-block; color: var(--accent); font-weight: 700; }
-.ui { background: var(--soft); color: #1d4ed8; border-radius: 4px; padding: 0 2px; white-space: nowrap; }
-pre { background: #0f172a; color: #e2e8f0; padding: 14px 16px; border-radius: 10px; overflow-x: auto; font-family: Consolas, "SF Mono", monospace; font-size: 14px; line-height: 1.6; }
+.ui { background: var(--soft); color: var(--accent-strong); border-radius: 5px; padding: 0 3px; white-space: nowrap; }
+pre { background: var(--pre); color: #e2e8f0; padding: 14px 16px; border-radius: 10px; overflow-x: auto; font-family: Consolas, "SF Mono", monospace; font-size: 14px; line-height: 1.6; }
 footer { text-align: center; color: var(--muted); font-size: 13px; }
-@media (max-width: 760px) { .wrap { grid-template-columns: 1fr; } nav { position: static; } }
-@media print { nav { display: none; } .wrap { display: block; } section { break-inside: avoid; border: 0; padding: 0 0 12px; } header { color: #000; background: none; padding: 0 0 12px; } }
+@media (max-width: 760px) { .wrap { grid-template-columns: 1fr; } nav { position: static; max-height: none; } }
+@media print {
+  :root, :root[data-theme="dark"] { --ink: #000; --muted: #444; --line: #ccc; --accent: #15924a; --accent-strong: #15924a; --soft: transparent; --bg: #fff; --panel: #fff; color-scheme: light; }
+  nav, .theme { display: none; } .wrap { display: block; } section { break-inside: avoid; border: 0; padding: 0 0 12px; } header { border: 0; padding: 0 0 12px; }
+}
 </style>
 </head>
 <body>
-<header><h1>${esc(title)}</h1><p>版本 ${esc(version)}　｜　所有資料存在這台電腦的 data 資料夾，不會上傳網路</p></header>
+<header><div class="head"><div><h1>${esc(title)}</h1><p>版本 ${esc(version)}　｜　所有資料存在這台電腦的 data 資料夾，不會上傳網路</p></div>
+<div class="theme" role="group" aria-label="畫面配色"><button data-t="light">淺色</button><button data-t="dark">深色</button></div></div></header>
 <div class="wrap">
 <nav>${toc}</nav>
 <main>
@@ -98,6 +109,18 @@ ${body}
 <footer>社區帳務管理 ${esc(version)}</footer>
 </main>
 </div>
+<script>
+(function () {
+  var root = document.documentElement, key = 'guide-theme';
+  function apply(t) { root.dataset.theme = t; document.querySelectorAll('.theme button').forEach(function (b) { b.className = b.dataset.t === t ? 'on' : ''; }); }
+  var saved = null;
+  try { saved = localStorage.getItem(key); } catch (e) {}
+  apply(saved === 'light' ? 'light' : 'dark');
+  document.querySelectorAll('.theme button').forEach(function (b) {
+    b.addEventListener('click', function () { apply(b.dataset.t); try { localStorage.setItem(key, b.dataset.t); } catch (e) {} });
+  });
+})();
+</script>
 </body>
 </html>
 `;

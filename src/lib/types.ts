@@ -98,6 +98,8 @@ export interface Settings {
   feePlans: FeePlan[];
   /** 智生活帳單項目（去掉「11月」等月份前綴）對應到：繳費項目名稱、BILL_ARREARS（帳單內含逾期）或 BILL_ASIS（照帳單，不比對基準）。 */
   billItemMap: Record<string, string>;
+  /** 畫面配色：深色（預設）或淺色；報表一律維持原本的配色。 */
+  theme?: 'light' | 'dark';
   totalUnits: number;
   billingStartMonth: string;
   incomeCategories: string[];

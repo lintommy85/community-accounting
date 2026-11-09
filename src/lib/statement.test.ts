@@ -161,5 +161,12 @@ describe('財務收支總表 lines', () => {
       ['清潔費', 500, false],
       ['電費', 1200, true],
     ]);
+    // 只勾「本期收入列為固定」：預收仍是非固定；再勾逾期、預收、暫收才一起列固定
+    d.settings.fixedCategories = ['管理費收入'];
+    expect(monthSheet(d, '2026-10').income.filter((l) => l.subject === '管理費收入').map((l) => [l.item, l.fixed])).toEqual([
+      ['車位清潔費收入', true], ['管理費收入', true], ['管理費預收款', false],
+    ]);
+    d.settings.fixedCategories = ['管理費收入', '管理費收入（逾期、預收、暫收）'];
+    expect(monthSheet(d, '2026-10').income.filter((l) => l.subject === '管理費收入').every((l) => l.fixed)).toBe(true);
   });
 });

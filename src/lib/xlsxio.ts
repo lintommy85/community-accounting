@@ -3,7 +3,7 @@ import { FIELD_LABELS, withCommunity } from './defaults';
 import { AccountRegister, netAmount, MonthReport } from './ledger';
 import { decodeText, Grid } from './parser';
 import { BREAKDOWN_LABELS, PositionSummary, signatureRows, Statement } from './statement';
-import { UnitSummary } from './allocation';
+import { BEFORE_START_TEXT, UnitSummary } from './allocation';
 import { ownerHistory, ownerHistoryText } from './owners';
 import { AppData, FieldKey } from './types';
 
@@ -185,7 +185,7 @@ export function exportMonthReport(data: AppData, r: MonthReport): Blob {
         l.payment.paidDate,
         l.payment.channel,
         l.payment.billPeriod,
-        [...l.allocations.map((a) => `${ml(a.month)} ${a.amount}`), ...(l.credit ? [`${l.pending ? '暫收' : '預收'} ${l.credit}`] : [])].join('、'),
+        [...l.allocations.map((a) => `${ml(a.month)} ${a.amount}`), ...(l.credit ? [`${l.pending ? '暫收' : '預收'} ${l.credit}`] : []), ...(l.beforeStart ? [BEFORE_START_TEXT] : [])].join('、'),
         l.payment.amount,
       ]),
       ['', '', '', '', '', '已繳合計', r.paidList.reduce((sum, l) => sum + l.payment.amount, 0)],

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { cardMonths, dueFor, isOpeningPayment, summarizeUnit, UnitAccount } from '../lib/allocation';
+import { BEFORE_START_TEXT, cardMonths, dueFor, isOpeningPayment, summarizeUnit, UnitAccount } from '../lib/allocation';
 import { withCommunity } from '../lib/defaults';
 import { ownerAt, ownerHistory } from '../lib/owners';
 import { Payment } from '../lib/types';
@@ -78,13 +78,14 @@ export default function UnitCard({ account, startMonth, onBack }: { account: Uni
             {account.feePayments.map((p) => {
               const allocated = allocatedOf(p.id);
               const opening = isOpeningPayment(p.id);
+              const before = account.beforeStart.has(p.id);
               return (
                 <tr key={p.id} className={opening ? 'sub-line' : ''}>
                   <td>{p.paidDate}</td><td>{p.channel}</td><td>{p.billPeriod}</td>
                   <td className="num"><Money value={p.amount} /></td>
                   <td className="num"><Money value={allocated} /></td>
-                  <td className="num">{p.amount - allocated ? <Money value={p.amount - allocated} /> : ''}</td>
-                  <td>{opening ? <span className="tag ok">期初預收款</span> : p.allocations ? <span className="tag warn">手動</span> : p.billPeriod ? <span className="tag">依期別</span> : <span className="tag">自動（先銷舊欠）</span>}</td>
+                  <td className="num">{!before && p.amount - allocated ? <Money value={p.amount - allocated} /> : ''}</td>
+                  <td>{opening ? <span className="tag ok">期初預收款</span> : before ? <span className="tag" title="期別在帳務起始月之前，這些月份沒有應繳，不銷帳、不列預收或暫收">{BEFORE_START_TEXT}</span> : p.allocations ? <span className="tag warn">手動</span> : p.billPeriod ? <span className="tag">依期別</span> : <span className="tag">自動（先銷舊欠）</span>}</td>
                   <td className="note-cell" title={p.note}>{p.note}</td>
                   <td className="no-print">{!opening && <button className="link" onClick={() => setEditing(p)}>調整銷帳</button>}</td>
                 </tr>

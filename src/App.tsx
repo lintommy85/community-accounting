@@ -17,22 +17,23 @@ import BackupPage from './pages/BackupPage';
 import FileBanner from './components/FileBanner';
 import GuideTour, { GUIDE_VERSION } from './components/GuideTour';
 import { Go, NavArgContext } from './components/nav';
+import { Icon, IconName } from './components/icons';
 
 const PAGES = [
-  { key: 'home', label: '總覽', el: Dashboard },
-  { key: 'ledger', label: '收支記帳', el: LedgerPage },
-  { key: 'petty', label: '零用金', el: PettyCashPage },
-  { key: 'accounts', label: '帳戶與轉帳', el: AccountsPage },
-  { key: 'import', label: '匯入智生活報表', el: ImportPage },
-  { key: 'payments', label: '繳費紀錄', el: PaymentsPage },
-  { key: 'deposits', label: '撥款對帳', el: DepositsPage },
-  { key: 'month', label: '月結／在途存款', el: MonthReportPage },
-  { key: 'statement', label: '收支報表', el: StatementPage },
-  { key: 'arrears', label: '欠費／銷帳', el: ArrearsPage },
-  { key: 'units', label: '戶別與月費', el: UnitsPage },
-  { key: 'settings', label: '基本設定', el: SettingsPage },
-  { key: 'backup', label: '備份與還原', el: BackupPage },
-] as const;
+  { key: 'home', label: '總覽', el: Dashboard, icon: 'home', group: '' },
+  { key: 'ledger', label: '收支記帳', el: LedgerPage, icon: 'book', group: '日常記帳' },
+  { key: 'petty', label: '零用金', el: PettyCashPage, icon: 'wallet', group: '日常記帳' },
+  { key: 'accounts', label: '帳戶與轉帳', el: AccountsPage, icon: 'bank', group: '日常記帳' },
+  { key: 'import', label: '匯入智生活報表', el: ImportPage, icon: 'upload', group: '管理費' },
+  { key: 'payments', label: '繳費紀錄', el: PaymentsPage, icon: 'receipt', group: '管理費' },
+  { key: 'deposits', label: '撥款對帳', el: DepositsPage, icon: 'check', group: '管理費' },
+  { key: 'arrears', label: '欠費／銷帳', el: ArrearsPage, icon: 'alert', group: '管理費' },
+  { key: 'month', label: '月結／在途存款', el: MonthReportPage, icon: 'calendar', group: '報表' },
+  { key: 'statement', label: '收支報表', el: StatementPage, icon: 'chart', group: '報表' },
+  { key: 'units', label: '戶別與月費', el: UnitsPage, icon: 'building', group: '設定' },
+  { key: 'settings', label: '基本設定', el: SettingsPage, icon: 'settings', group: '設定' },
+  { key: 'backup', label: '備份與還原', el: BackupPage, icon: 'archive', group: '設定' },
+] as const satisfies readonly { key: string; label: string; icon: IconName; group: string; el: unknown }[];
 
 export type PageKey = (typeof PAGES)[number]['key'];
 
@@ -46,7 +47,12 @@ export default function App() {
     setPage(p);
     setNavArg(arg);
   };
-  const { communityName, logo } = data.settings;
+  const { communityName, logo, theme } = data.settings;
+  const dark = theme !== 'light';
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  }, [dark]);
 
   useEffect(() => {
     document.title = appTitle({ communityName });
@@ -100,28 +106,42 @@ export default function App() {
       </div>
     );
   }
-  const Current = PAGES.find((p) => p.key === page)!.el;
+  const current = PAGES.find((p) => p.key === page)!;
+  const Current = current.el;
   return (
     <div className="layout">
       <nav className="sidebar">
         <div className="brand">
-          {logo && <img className="brand-logo" src={logo} alt="" />}
+          {logo ? <img className="brand-logo" src={logo} alt="" /> : <span className="brand-mark"><Icon name="building" /></span>}
           <div>
             <div className="brand-title">{communityName || '社區帳務管理'}</div>
             <div className="brand-sub">{communityName ? '帳務管理系統' : '尚未設定社區名稱'}</div>
           </div>
         </div>
-        {PAGES.map((p) => (
-          <button key={p.key} className={page === p.key ? 'nav active' : 'nav'} onClick={() => go(p.key)}>
-            {p.label}
-          </button>
+        {PAGES.map((p, i) => (
+          <div key={p.key} className="nav-item">
+            {p.group && p.group !== PAGES[i - 1]?.group && <div className="nav-group">{p.group}</div>}
+            <button className={page === p.key ? 'nav active' : 'nav'} onClick={() => go(p.key)}>
+              <Icon name={p.icon} />
+              <span>{p.label}</span>
+            </button>
+          </div>
         ))}
-        <div className="save-state">
-          {saveError ? <span className="err">儲存失敗：{saveError}</span> : lastSavedAt ? `已儲存 ${lastSavedAt}` : ''}
-        </div>
-        {service && <button className="shutdown" disabled={stopping} onClick={stopSystem}>{stopping ? '正在結束…' : '⏻ 結束系統'}</button>}
+        {service && <button className="shutdown" disabled={stopping} onClick={stopSystem}><Icon name="power" /><span>{stopping ? '正在結束…' : '結束系統'}</span></button>}
       </nav>
       <main className="main">
+        <header className="topbar">
+          <h1><Icon name={current.icon} /> {current.label}</h1>
+          <div className="topbar-right">
+            <div className="save-state">
+              {saveError ? <span className="err">儲存失敗：{saveError}</span> : lastSavedAt ? <><span className="dot" /> 已儲存 {lastSavedAt}</> : ''}
+            </div>
+            <div className="theme-switch" role="group" aria-label="畫面配色">
+              <button className={dark ? '' : 'on'} onClick={() => dark && update((d) => ({ ...d, settings: { ...d.settings, theme: 'light' } }), '切換畫面配色', '淺色')}><Icon name="sun" />淺色</button>
+              <button className={dark ? 'on' : ''} onClick={() => !dark && update((d) => ({ ...d, settings: { ...d.settings, theme: 'dark' } }), '切換畫面配色', '深色')}><Icon name="moon" />深色</button>
+            </div>
+          </div>
+        </header>
         <FileBanner onGo={go} />
         <NavArgContext.Provider value={navArg}>
           <Current key={`${page}:${navArg}`} go={go} />

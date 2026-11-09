@@ -1,3 +1,4 @@
+import { BEFORE_START_TEXT } from '../lib/allocation';
 import { formatMoney } from '../lib/defaults';
 import { MonthReport } from '../lib/ledger';
 import { rocYear } from '../lib/statement';
@@ -38,6 +39,7 @@ export default function WriteOffSheet({ data, month, report, printOnly }: { data
               <td>
                 {l.allocations.map((a) => `${monthLabel(a.month)} ${formatMoney(a.amount)}`).join('、')}
                 {l.credit ? `${l.allocations.length ? '、' : ''}${l.pending ? '暫收' : '預收'} ${formatMoney(l.credit)}` : ''}
+                {l.beforeStart ? BEFORE_START_TEXT : ''}
               </td>
               <td className="fs-num">{formatMoney(l.payment.amount)}</td>
             </tr>

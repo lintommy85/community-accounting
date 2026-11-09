@@ -142,6 +142,30 @@ describe('splitting 智生活 bills against the baseline', () => {
     expect(r.dues.filter((x) => x.unitNo === 'B' && x.month === '2026-11').reduce((t, x) => t + x.amount, 0)).toBe(0);
   });
 
+  it('switches a reduced-due offset to the prepaid entered afterwards, without re-importing', () => {
+    const d = setup();
+    d.settings.billingStartMonth = '2026-11';
+    d.settings.billItemMap = { 年繳沖銷: BILL_PREPAID };
+    d.dues = [];
+    d.payments = [];
+    const r = importBills(d, [bill('B', 2000), bill('B', 500, '11月汽車位清潔費'), bill('B', -2500, '年繳沖銷'), bill('A', 2000), bill('A', -10, '年繳沖銷')]);
+    d.dues = r.dues;
+    expect(allocateAll(d).byKey.get('B')!.dueByMonth.get('2026-11')).toBe(0);
+    // 事後補輸入期初預收款：應繳恢復原額，改由預收款沖銷
+    d.settings.units[1].openingPrepaid = 5000;
+    d.settings.units[0].openingPrepaid = 10;
+    d.payments = [pay('a1', 'A', '2026-11-05', 1990)];
+    const res = allocateAll(d);
+    const b = res.byKey.get('B')!;
+    expect([b.dueByMonth.get('2026-11'), b.paidByMonth.get('2026-11'), b.prepaidBeforeUsed.get('2026-11'), b.credit]).toEqual([2500, 2500, 2500, 2500]);
+    const a = res.byKey.get('A')!;
+    expect([a.dueByMonth.get('2026-11'), a.paidByMonth.get('2026-11'), a.credit]).toEqual([2000, 2000, 0]);
+    // 只有當月才繳的款項不算預收款：沒有期初預收款時維持照帳單減少應繳
+    d.settings.units[0].openingPrepaid = undefined;
+    const c = allocateAll(d).byKey.get('A')!;
+    expect([c.dueByMonth.get('2026-11'), c.paidByMonth.get('2026-11'), c.credit]).toEqual([1990, 1990, 0]);
+  });
+
   it('pays 年繳沖銷 from the opening prepaid entered for households that prepaid before the system started', () => {
     const d = setup();
     d.settings.billingStartMonth = '2026-11';

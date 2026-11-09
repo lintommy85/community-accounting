@@ -6,6 +6,7 @@ import {
   BILL_ARREARS,
   BILL_ASIS,
   BILL_PREPAID,
+  billTargetLabel,
   BillSplit,
   billItemName,
   DiffDecision,
@@ -40,7 +41,7 @@ function splitNote(sp: BillSplit): string {
   if (!notes.length && sp.carried) notes.push(`帳單內含逾期 ${fmt(sp.carried)}，與系統欠款相符`);
   if (sp.prepaid) notes.push(`沖銷 ${fmt(sp.prepaid)} 從這戶的預收款扣除（預收款 ${fmt(sp.prepaidBalance)} → ${fmt(sp.prepaidBalance - sp.prepaid)}）`);
   if (sp.autoPrepaid) notes.push(`這戶有預收款，本期應繳 ${fmt(sp.autoPrepaid)} 會自動從預收款銷帳，等同沖銷（預收款 ${fmt(sp.autoBalance)} → ${fmt(sp.autoBalance - sp.autoPrepaid)}）`);
-  if (sp.prepaidBefore) notes.push(`沖銷 ${fmt(sp.prepaidBefore)} 超過這戶的預收款（只有 ${fmt(sp.prepaidBalance)}），不足的部分照帳單減少應繳（啟用前已預繳的請到「戶別與月費 → 期初預收款」輸入後重新匯入）`);
+  if (sp.prepaidBefore) notes.push(`沖銷 ${fmt(sp.prepaidBefore)} 超過這戶的預收款（只有 ${fmt(sp.prepaidBalance)}），不足的部分照帳單減少應繳（啟用前已預繳的，到「戶別與月費 → 期初預收款」輸入後會自動改由預收款沖銷）`);
   return notes.join('；');
 }
 
@@ -248,8 +249,7 @@ export default function BillImport({ go }: { go?: Go }) {
     reset();
   }
 
-  const targetLabel = (t: string) =>
-    t === BILL_ARREARS ? '逾期（帳單內含，不列應繳）' : t === BILL_PREPAID ? '沖銷（從這戶的預收款扣除）' : t === BILL_ASIS ? '照帳單（減免等，不比對基準）' : `繳費項目：${t}`;
+  const targetLabel = billTargetLabel;
 
   return (
     <>
@@ -463,7 +463,7 @@ export default function BillImport({ go }: { go?: Go }) {
                   <li className="warn">
                     {plan.splits.filter((sp) => sp.prepaidBefore).length} 戶帳單的沖銷超過這戶的預收款，不足的部分這次照帳單減少應繳：
                     {plan.splits.filter((sp) => sp.prepaidBefore).slice(0, 6).map((sp) => sp.unitNo).join('、')}{plan.splits.filter((sp) => sp.prepaidBefore).length > 6 ? '…' : ''}。
-                    啟用本系統前已預繳的，請先到「戶別與月費 → 期初預收款」輸入每戶還剩多少預收款再匯入，沖銷就會由預收款銷帳。
+                    啟用本系統前已預繳的，到「戶別與月費 → 期初預收款」輸入每戶還剩多少預收款，沖銷就會自動改由預收款銷帳（匯入前或匯入後輸入都可以）。
                   </li>
                 )}
                 {flagged('offCycle').length > 0 && <li className="err">{flagged('offCycle').length} 戶這個月不是繳費週期的第一個月，不會匯入，請確認「基準與費率」的繳費週期：{flagged('offCycle').slice(0, 6).map((sp) => sp.unitNo).join('、')}{flagged('offCycle').length > 6 ? '…' : ''}</li>}

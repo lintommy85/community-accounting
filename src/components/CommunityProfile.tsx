@@ -4,7 +4,8 @@ import { loadImage, MAX_UPLOAD_BYTES, needsCrop, renderSquare } from '../lib/ima
 import { useStore } from '../store';
 import LogoCropper from './LogoCropper';
 
-export default function CommunityProfile() {
+/** 社區名稱與圖示；removable 時才顯示「移除圖示」（只在基本設定）。 */
+export default function CommunityProfile({ removable = false }: { removable?: boolean }) {
   const { data, update } = useStore();
   const s = data.settings;
   const [name, setName] = useState(s.communityName);
@@ -53,7 +54,7 @@ export default function CommunityProfile() {
         />
         <div className="profile-hint">
           帳務管理系統
-          {s.logo && <button className="link danger" onClick={() => confirm('移除社區圖示？') && setLogo('', '移除社區圖示')}>移除圖示</button>}
+          {removable && s.logo && <button className="link danger" onClick={() => confirm('移除社區圖示？') && setLogo('', '移除社區圖示')}>移除圖示</button>}
         </div>
         {err && <div className="err">{err}</div>}
       </div>

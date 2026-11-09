@@ -51,18 +51,18 @@ export default function Dashboard({ go }: { go: Go }) {
     <>
       <CommunityProfile />
       <div className="stats">
-        <Stat label={`${month} 本月總收入`} value={monthIncome} hint={`管理費 ${r.received.gross.toLocaleString('zh-TW')}＋其他收入 ${(monthIncome - r.received.gross).toLocaleString('zh-TW')}`} />
-        <Stat label={`${month} 本月總支出`} value={monthExpense} hint={`${r.expense.length} 個科目`} />
-        <Stat label={`${month} 本月結餘`} value={monthIncome - monthExpense} hint="總收入－總支出" tone={monthIncome - monthExpense < 0 ? 'warn' : 'ok'} />
-        <Stat label="銀行帳戶總餘額" value={bankTotal} hint={`${bankBalances.length} 個銀行帳戶，截至 ${today}`} onClick={() => go('accounts')} />
+        <Stat label={`${month} 本月總收入`} icon="arrowDown" color="green" value={monthIncome} hint={`管理費 ${r.received.gross.toLocaleString('zh-TW')}＋其他收入 ${(monthIncome - r.received.gross).toLocaleString('zh-TW')}`} />
+        <Stat label={`${month} 本月總支出`} icon="arrowUp" color="red" value={monthExpense} hint={`${r.expense.length} 個科目`} />
+        <Stat label={`${month} 本月結餘`} icon="scale" color="blue" value={monthIncome - monthExpense} hint="總收入－總支出" tone={monthIncome - monthExpense < 0 ? 'warn' : 'ok'} />
+        <Stat label="銀行帳戶總餘額" icon="bank" color="purple" value={bankTotal} hint={`${bankBalances.length} 個銀行帳戶，截至 ${today}`} onClick={() => go('accounts')} />
       </div>
       <div className="stats">
-        <Stat label={`${month} 住戶繳費`} value={r.received.gross} hint={`${r.received.count} 筆`} />
-        <Stat label={`${month} 已撥入銀行`} value={r.deposited.gross} hint={`${r.deposited.count} 筆（依報表入帳日）`} />
-        <Stat label={`${month} 月底在途（目前）`} value={r.closingInTransit.gross} hint={`${r.closingInTransit.count} 筆，入帳日在下月或報表尚無入帳日`} />
-        <Stat label="待確認款項" value={pendingTotal} hint={`${pending.length} 筆，撥款對帳尚未核對相符`} tone={pendingTotal ? 'warn' : undefined} onClick={() => go('deposits')} title="前往撥款對帳" />
-        <Stat label={`${month} 預收款`} value={adv.prepaid} hint="已核對的預繳、多繳款項（含期初預收款），每月沖銷後減少" />
-        {adv.suspense !== 0 && <Stat label={`${month} 暫收款`} value={adv.suspense} hint="已核對，期別的每月應繳還沒匯入" tone="warn" />}
+        <Stat label={`${month} 住戶繳費`} icon="receipt" color="green" value={r.received.gross} hint={`${r.received.count} 筆`} />
+        <Stat label={`${month} 已撥入銀行`} icon="inbox" color="blue" value={r.deposited.gross} hint={`${r.deposited.count} 筆（依報表入帳日）`} />
+        <Stat label={`${month} 月底在途（目前）`} icon="truck" color="yellow" value={r.closingInTransit.gross} hint={`${r.closingInTransit.count} 筆，入帳日在下月或報表尚無入帳日`} />
+        <Stat label="待確認款項" icon="hourglass" color="red" value={pendingTotal} hint={`${pending.length} 筆，撥款對帳尚未核對相符`} tone={pendingTotal ? 'warn' : undefined} onClick={() => go('deposits')} title="前往撥款對帳" />
+        <Stat label={`${month} 預收款`} icon="coins" color="purple" value={adv.prepaid} hint="已核對的預繳、多繳款項（含期初預收款），每月沖銷後減少" />
+        <Stat label={`${month} 暫收款`} icon="clock" color="gray" value={adv.suspense} hint="已核對，期別的每月應繳還沒匯入" tone={adv.suspense ? 'warn' : undefined} />
       </div>
       <Section title="待辦事項">
         {todos.length === 0 ? (

@@ -119,7 +119,7 @@ export default function ImportReview({
         </table>
 
         {c.months[0] < alloc.startMonth && (
-          <p className="banner err">{c.months[0]} 早於帳務起始月 {alloc.startMonth}，這個月份的應繳不會銷帳。請先取消匯入，把帳務起始月往前改（匯入頁會提示），再重新匯入。</p>
+          <p className="banner err">{c.months[0]} 早於帳務起始月 {alloc.startMonth}，這個月份的應繳不會銷帳。要從這個月開始記帳，請先取消匯入，匯入這個月的每月應繳報表（帳務起始月會自動往前改），再重新匯入。</p>
         )}
         {c.prev && (
           <div className={`banner block ${draft.pick ? 'ok' : 'warn'}`}>

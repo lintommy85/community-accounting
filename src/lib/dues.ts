@@ -6,6 +6,8 @@ import { Due } from './types';
 
 export const DEFAULT_ITEM = '管理費';
 export const PRIOR_ITEM = '前期欠款';
+/** 系統沒有這戶的預繳款（例如啟用本系統前預繳）時，沖銷照帳單減少應繳；之後有預收款時，銷帳會自動改由預收款沖銷。 */
+export const PREPAID_BEFORE_ITEM = '預繳沖銷（啟用前預繳）';
 
 export const normUnit = (s: string) => s.replace(/\s+/g, '').toUpperCase();
 

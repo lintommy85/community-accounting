@@ -239,3 +239,39 @@ describe('amount check for payments split into several transfers', () => {
     expect(findAmountMismatches(d, new Set([again.id])).map((c) => [c.expected, c.diff])).toEqual([[0, 2000]]);
   });
 });
+
+describe('payments for bills before the billing start month', () => {
+  /** 從 11 月開始記帳，只匯入 11 月帳單；入帳報表裡有 10 月期別的繳款。 */
+  function fromNov(payments: Payment[], extraDues: Due[] = []) {
+    const d = setup(payments, extraDues, ['2026-11']);
+    d.settings.billingStartMonth = '2026-11';
+    return d;
+  }
+
+  it('does not use an October bill payment to clear November, nor keep it as 暫收', () => {
+    const d = fromNov([pay('A1-3F', '2026-10-15', 4000, '115年10月管理費')]);
+    const r = allocateAll(d);
+    const acc = r.byKey.get('A1-3F')!;
+    expect(acc.allocations).toEqual([]);
+    expect(acc.credit).toBe(0);
+    expect(acc.beforeStart.size).toBe(1);
+    expect(advancesFromAllocations(r, d.payments, '2026-11')).toEqual({ prepaid: 0, suspense: 0 });
+    expect(summarizeUnit(acc, '2026-11', '2026-11').owing).toBe(2000);
+    expect(receiptBreakdown(r, d.payments, '2026-10-01', '2026-10-31').arrears).toBe(4000);
+    expect(findAmountMismatches(d, new Set(d.payments.map((p) => p.id)))).toEqual([]);
+  });
+
+  it('still writes off October arrears carried on the November bill', () => {
+    const d = fromNov([pay('A1-3F', '2026-11-02', 2000, '115年10月管理費')], [{ ...due('A1-3F', '2026-10', 2000, '前期欠款'), fromBill: '2026-11' }]);
+    const acc = allocateAll(d).byKey.get('A1-3F')!;
+    expect(acc.allocations.map((a) => [a.month, a.amount])).toEqual([['2026-10', 2000]]);
+    expect(acc.beforeStart.size).toBe(0);
+  });
+
+  it('keeps payments without a period and November payments on the normal rules', () => {
+    const d = fromNov([pay('A1-3F', '2026-10-20', 2000), pay('A1-5F', '2026-11-05', 2000, '115年11月管理費')]);
+    const r = allocateAll(d);
+    expect(r.byKey.get('A1-3F')!.allocations.map((a) => a.month)).toEqual(['2026-11']);
+    expect(r.byKey.get('A1-5F')!.allocations.map((a) => a.month)).toEqual(['2026-11']);
+  });
+});

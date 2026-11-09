@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Go } from './nav';
-import { normUnit } from '../lib/allocation';
-import { PRIOR_ITEM } from '../lib/dues';
+import { allocateAll, normUnit } from '../lib/allocation';
+import { PREPAID_BEFORE_ITEM, PRIOR_ITEM } from '../lib/dues';
 import { activeUnits, cycleLabel, sortUnits, unitBaseline } from '../lib/fees';
 import { ownerAt, ownerMatches } from '../lib/owners';
 import { Due } from '../lib/types';
@@ -21,12 +21,15 @@ export default function MonthDues({ go }: { go: Go }) {
     for (const d of data.dues) if (d.month === month || d.fromBill === month) (m.get(normUnit(d.unitNo)) ?? m.set(normUnit(d.unitNo), []).get(normUnit(d.unitNo))!).push(d);
     return m;
   }, [data.dues, month]);
+  const alloc = useMemo(() => allocateAll(data), [data]);
   const kw = q.trim().toUpperCase();
   const units = sortUnits(activeUnits(s.units));
   const rows = units.map((u) => {
     const items = dueMap.get(normUnit(u.unitNo)) ?? [];
     const current = items.filter((d) => d.month === month);
-    const due = current.reduce((sum, d) => sum + d.amount, 0);
+    // 匯入時照帳單減少應繳的沖銷，之後有預收款就改由預收款沖銷，應繳恢復原額
+    const switched = alloc.byKey.get(normUnit(u.unitNo))?.prepaidBeforeUsed.get(month) ?? 0;
+    const due = current.reduce((sum, d) => sum + d.amount, 0) + switched;
     const billRows = current.filter((d) => !d.fromBill);
     const bill = billRows.reduce((sum, d) => sum + (d.billAmount ?? d.amount), 0);
     // 這張帳單拆出的應繳：本月份＋季繳／年繳的其他週期月份
@@ -34,8 +37,10 @@ export default function MonthDues({ go }: { go: Go }) {
     const prior = items.filter((d) => d.fromBill === month && d.item === PRIOR_ITEM).reduce((sum, d) => sum + d.amount, 0);
     const inCycle = current.find((d) => d.fromBill && d.item !== PRIOR_ITEM)?.fromBill;
     const base = unitBaseline(u, s.feePlans);
-    const issue = !base && !current.length ? '未設定基準' : !current.length ? '尚未匯入' : billRows.length && bill < covered ? '帳單低於基準' : '';
-    return { u, current, due, bill, covered, hasBill: billRows.length > 0, carried: Math.max(0, bill - covered), prior, inCycle, base, issue };
+    // 帳單上的預繳沖銷由預收款銷帳，比較帳單和基準時要加回來（例如年繳戶帳單是 0）
+    const offset = billRows.filter((d) => d.kind === 'prepaid').reduce((sum, d) => sum - (d.billAmount ?? 0), 0);
+    const issue = !base && !current.length ? '未設定基準' : !current.length ? '尚未匯入' : billRows.length && bill + offset < covered ? '帳單低於基準' : '';
+    return { u, current, due, switched, bill, covered, hasBill: billRows.length > 0, carried: Math.max(0, bill - covered), prior, inCycle, base, issue };
   });
   const shown = rows
     .filter((r) => !kw || r.u.unitNo.toUpperCase().includes(kw) || ownerMatches(r.u, kw))
@@ -82,11 +87,17 @@ export default function MonthDues({ go }: { go: Go }) {
                 <td className="num">{r.current.length ? <Money value={r.due} strong /> : ''}</td>
                 <td>
                   <div className="due-items">
-                    {r.current.map((d) => (
-                      <span key={d.id} className={`due-chip ${d.amount < 0 ? 'neg' : ''} ${d.kind === 'arrears' || d.kind === 'prepaid' ? 'muted' : ''}`} title={d.kind === 'arrears' ? '帳單內含逾期，不列應繳' : d.kind === 'prepaid' ? '由預收款銷帳，不減少應繳' : d.billAmount !== undefined && d.billAmount !== d.amount ? `帳單 ${d.billAmount.toLocaleString('zh-TW')}` : undefined}>
-                        {d.item} {(d.kind === 'arrears' || d.kind === 'prepaid' ? d.billAmount ?? 0 : d.amount).toLocaleString('zh-TW')}
-                      </span>
-                    ))}
+                    {r.current.map((d) => {
+                      const muted = d.kind === 'arrears' || d.kind === 'prepaid' || (d.item === PREPAID_BEFORE_ITEM && r.switched > 0);
+                      const title = d.kind === 'arrears' ? '帳單內含逾期，不列應繳' : d.kind === 'prepaid' ? '由預收款銷帳，不減少應繳'
+                        : d.item === PREPAID_BEFORE_ITEM ? (r.switched >= -d.amount ? '已改由預收款沖銷，不減少應繳' : r.switched ? `其中 ${r.switched.toLocaleString('zh-TW')} 已改由預收款沖銷，其餘照帳單減少應繳` : '沒有預收款可以扣，照帳單減少應繳')
+                        : d.billAmount !== undefined && d.billAmount !== d.amount ? `帳單 ${d.billAmount.toLocaleString('zh-TW')}` : undefined;
+                      return (
+                        <span key={d.id} className={`due-chip ${d.amount < 0 ? 'neg' : ''} ${muted ? 'muted' : ''}`} title={title}>
+                          {d.item} {(d.kind === 'arrears' || d.kind === 'prepaid' ? d.billAmount ?? 0 : d.amount).toLocaleString('zh-TW')}
+                        </span>
+                      );
+                    })}
                   </div>
                 </td>
                 <td>{r.issue && <span className={`tag ${r.issue === '尚未匯入' ? '' : 'warn'}`}>{r.issue}</span>}</td>

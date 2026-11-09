@@ -8,8 +8,7 @@ import { useSelection } from '../components/useSelection';
 import { isEnterKey, Money, Section } from '../components/ui';
 import { normUnit } from '../lib/allocation';
 import { newId } from '../lib/defaults';
-import { BILL_ARREARS, BILL_ASIS, BILL_PREPAID } from '../lib/bills';
-import { activeUnits, assignAmount, assignCycle, assignExtra, assignPlan, cycleLabel, CYCLES, extraItem, feeItemNames, MGMT_ITEM, planFee, removeExtra, setUnitItemBaseline, removePlan, setUnitArea, sortUnits, unitBaseline, updatePlan } from '../lib/fees';
+import { activeUnits, assignAmount, assignCycle, assignExtra, assignPlan, cycleLabel, CYCLES, extraItem, planFee, removeExtra, setUnitItemBaseline, removePlan, setUnitArea, sortUnits, unitBaseline, updatePlan } from '../lib/fees';
 import { ownerHistory, ownerMatches } from '../lib/owners';
 import { FeePlan, Settings, Unit } from '../lib/types';
 import { useStore } from '../store';
@@ -272,7 +271,6 @@ export default function UnitsPage({ go }: { go: Go }) {
               <button onClick={addUnit}>新增戶別</button>
             </div>
           </Section>
-          <BillItemMapEditor />
         </>
       )}
       {ownerUnit && <OwnerHistory unit={ownerUnit} onClose={() => setOwnerUnit(null)} />}
@@ -371,46 +369,3 @@ function PlanEditor({
   );
 }
 
-function BillItemMapEditor() {
-  const { data, update } = useStore();
-  const s = data.settings;
-  const entries = Object.entries(s.billItemMap ?? {}).sort((a, b) => a[0].localeCompare(b[0], 'zh-Hant'));
-  const items = feeItemNames(s);
-  const setTarget = (name: string, target: string | null) =>
-    update((d) => {
-      const map = { ...d.settings.billItemMap };
-      if (target) map[name] = target;
-      else delete map[name];
-      return { ...d, settings: { ...d.settings, billItemMap: map } };
-    }, target ? '修改帳單項目對應' : '刪除帳單項目對應', `${name}${target ? `→${target}` : ''}`);
-  return (
-    <Section title={`智生活帳單項目對應（${entries.length} 個）`}>
-      <p className="hint">
-        匯入每月應繳報表時，帳單項目（去掉「11月」等月份前綴）要對應到上方的繳費項目：方案名稱就是繳費項目；每戶的主方案（例如「坪數費」）和個別金額（「{MGMT_ITEM}」）視為同一項主要費用。
-        名稱相同會自動對應；不同的（例如帳單「腳踏車清潔費」對應方案「腳踏車位清潔費」）在匯入時選擇一次就會記在這裡。
-      </p>
-      {entries.length === 0 ? <p className="empty">還沒有對應，匯入每月應繳報表時會請你選擇。</p> : (
-        <table className="compact-inputs status-table">
-          <thead><tr><th>帳單項目</th><th>對應到</th><th></th></tr></thead>
-          <tbody>
-            {entries.map(([name, target]) => (
-              <tr key={name}>
-                <td>{name}</td>
-                <td>
-                  <select value={target} onChange={(e) => setTarget(name, e.target.value)}>
-                    {!items.includes(target) && target !== BILL_ARREARS && target !== BILL_ASIS && target !== BILL_PREPAID && <option value={target}>{target}（已不存在）</option>}
-                    {items.map((f) => <option key={f} value={f}>繳費項目：{f}</option>)}
-                    <option value={BILL_ARREARS}>逾期（帳單內含，不列應繳）</option>
-                    <option value={BILL_PREPAID}>沖銷（從這戶的預收款扣除）</option>
-                    <option value={BILL_ASIS}>照帳單（減免等，不比對基準）</option>
-                  </select>
-                </td>
-                <td><button className="link danger" onClick={() => setTarget(name, null)}>刪除</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </Section>
-  );
-}

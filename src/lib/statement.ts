@@ -184,6 +184,8 @@ export interface MonthSheet {
 }
 
 export const FEE_SUBJECT = '管理費收入';
+/** 固定科目設定中的鍵：勾選時，匯入繳費的逾期、預收、暫收部分也列為固定收入（本期部分看 FEE_SUBJECT）。 */
+export const FEE_OTHER_FIXED = '管理費收入（逾期、預收、暫收）';
 
 /**
  * 財務收支總表（仿智生活格式）：管理費收入依收費項目拆成收入／預收款／逾期／暫收款，
@@ -197,14 +199,15 @@ export function monthSheet(data: AppData, month: string): MonthSheet {
   const fixed = new Set(settings.fixedCategories);
   const isFixed = (subject: string, item: string) => fixed.has(subject) || fixed.has(item);
   const income: SheetLine[] = [];
-  const fee = (item: string, text: string, amount: number) =>
-    amount && income.push({ subject: FEE_SUBJECT, item: text, month: label, note: '住戶', amount: Math.round(amount), fixed: isFixed(FEE_SUBJECT, item) });
+  // 本期收入看「管理費收入」是否勾固定；逾期、預收、暫收另外勾選
+  const fee = (item: string, text: string, amount: number, current = false) =>
+    amount && income.push({ subject: FEE_SUBJECT, item: text, month: label, note: '住戶', amount: Math.round(amount), fixed: current ? isFixed(FEE_SUBJECT, item) : fixed.has(FEE_OTHER_FIXED) });
 
   const itemOf = (p: { item: string }) => p.item || '管理費';
   if (settings.units.some((u) => !u.deletedAt)) {
     const groups = receiptBreakdownBy(allocateAll(data), data.payments, start, end, itemOf);
     for (const [item, b] of Array.from(groups).sort((a, b2) => a[0].localeCompare(b2[0], 'zh-Hant'))) {
-      fee(item, `${item}收入`, b.current);
+      fee(item, `${item}收入`, b.current, true);
       fee(item, `${item}預收款`, b.prepaid);
       fee(item, `逾期${item}`, b.arrears);
       fee(item, `${item}暫收款`, b.credit);
@@ -213,7 +216,7 @@ export function monthSheet(data: AppData, month: string): MonthSheet {
   } else {
     const byItem = new Map<string, number>();
     for (const p of active(data.payments)) if (p.paidDate >= start && p.paidDate <= end) byItem.set(itemOf(p), (byItem.get(itemOf(p)) ?? 0) + p.amount);
-    for (const [item, amount] of byItem) fee(item, `${item}收入`, amount);
+    for (const [item, amount] of byItem) fee(item, `${item}收入`, amount, true);
   }
 
   const expense: SheetLine[] = [];

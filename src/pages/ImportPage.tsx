@@ -75,6 +75,10 @@ export default function ImportPage({ go }: { go: Go }) {
       sums.set(group, total);
     }
     const months = Array.from(new Set(rows.map((r) => monthOf(r.paidDate)))).sort();
+    // 繳的是帳務起始月前的帳單（那些月份沒有應繳）：不銷帳，也不列預收或暫收
+    const dryAlloc = allocateAll({ ...data, payments: dry.payments });
+    const before = dry.payments.filter((p) => p.batchId === 'preview' && dryAlloc.byKey.get(normUnit(p.unitNo))?.beforeStart.has(p.id));
+    const beforeStart = { count: before.length, amount: before.reduce((t, p) => t + p.amount, 0) };
     return {
       rows,
       openRows,
@@ -85,6 +89,7 @@ export default function ImportPage({ go }: { go: Go }) {
       total: rows.reduce((s, r) => s + r.amount, 0),
       net,
       mismatches,
+      beforeStart,
       maybeDup,
       meta,
       payoutAccount,
@@ -127,9 +132,6 @@ export default function ImportPage({ go }: { go: Go }) {
     setMapping(guessMapping(gridToTable(sheet.sheetName, sheet.grid, n).headers, data.settings.mapping));
   }
 
-  const earliest = [...(preview?.months ?? []), ...data.dues.map((d) => d.month)].reduce((m, x) => (!m || x < m ? x : m), '');
-  const earlyMonth = preview && data.settings.billingStartMonth && earliest && earliest < data.settings.billingStartMonth ? earliest : '';
-  const d0 = (m: string) => m || '（自動）';
 
   function doImport() {
     if (!preview || !table) return;
@@ -285,10 +287,11 @@ export default function ImportPage({ go }: { go: Go }) {
                 </li>
                 {preview.maybeDup.size > 0 && <li className="warn">{preview.maybeDup.size} 筆可能重複：同一戶、同期別已經有相同金額的繳費（收據單號不同），而且合計超過這期帳單。請在下表確認，重複的取消勾選「新增」；確實多繳的保留，會列入這戶的預收款。</li>}
                 <li>{preview.withDepositDate === preview.rows.length ? '全部都有入帳日' : `${preview.rows.length - preview.withDepositDate} 筆沒有入帳日，視為尚未入帳（在途存款）`}</li>
-                {earlyMonth && (
-                  <li className="err">
-                    帳務起始月是 {data.settings.billingStartMonth}，但有更早的繳費或應繳（{earlyMonth}）；起始月之前的應繳不會銷帳（確認視窗的應繳會顯示 0）。
-                    <button className="primary" onClick={() => update((d) => ({ ...d, settings: { ...d.settings, billingStartMonth: earlyMonth } }), '修改帳務起始月', `${d0(data.settings.billingStartMonth)} → ${earlyMonth}`)}>把起始月改成 {earlyMonth}</button>
+                {preview.beforeStart.count > 0 && (
+                  <li>
+                    {preview.beforeStart.count} 筆（<Money value={preview.beforeStart.amount} /> 元）繳的是帳務起始月（{data.settings.billingStartMonth || '自動'}）之前的帳單，
+                    這些月份沒有應繳，所以不銷帳，也不列預收或暫收；收入照樣列入繳費當月的「補繳以前月份」。
+                    要從更早的月份開始記帳，請先匯入那個月的每月應繳報表（帳務起始月會自動往前改）。
                   </li>
                 )}
                 {preview.mismatches > 0 && <li className="warn">{preview.mismatches} 筆繳費金額與帳單金額不同（多繳或少繳），按「確認匯入」後會逐筆請你確認要銷哪幾個月</li>}

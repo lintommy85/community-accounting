@@ -6,10 +6,13 @@ import HouseholdSetup from '../components/HouseholdSetup';
 import { openGuide } from '../components/GuideTour';
 import Signatures from '../components/Signatures';
 import { MAX_SIGNATURES, newId, PETTY_OTHER, resolveDepositAccountId, withPettyOther } from '../lib/defaults';
-import { activeUnits, deletedUnits, sortUnits } from '../lib/fees';
+import { activeUnits, deletedUnits, feeItemNames, sortUnits } from '../lib/fees';
+import { BILL_ARREARS, BILL_ASIS, BILL_PREPAID, billTargetLabel } from '../lib/bills';
+
+const SPECIAL_TARGETS: string[] = [BILL_PREPAID, BILL_ARREARS, BILL_ASIS];
 import { Account, PettyCashEntry, Settings, SignatureSlot } from '../lib/types';
 import { useStore } from '../store';
-import { FEE_SUBJECT } from '../lib/statement';
+import { FEE_OTHER_FIXED, FEE_SUBJECT } from '../lib/statement';
 import { moveItem, useDragReorder } from '../components/useDragReorder';
 
 
@@ -32,7 +35,7 @@ export default function SettingsPage({ go }: { go: (p: PageKey) => void }) {
         <p className="hint">動畫介紹每月的工作流程；完整說明也可以直接開啟程式資料夾裡的「使用說明.html」。</p>
       </Section>
       <Section title="社區名稱與圖示">
-        <CommunityProfile />
+        <CommunityProfile removable />
         <p className="hint">輸入後系統標題、瀏覽器分頁、所有報表、催繳單與匯出檔名都會使用這個名稱。圖示不是正方形或大於 256×256 時會出現裁切畫面。</p>
       </Section>
 
@@ -67,7 +70,80 @@ export default function SettingsPage({ go }: { go: (p: PageKey) => void }) {
           <p className="hint">零用金科目用於「零用金」頁的項目下拉選單，零用金明細不會出現在收支表；每月撥補以支出「零用金撥補」列入。</p>
         </div>
       </Section>
+
+      <BillItemMapEditor />
     </>
+  );
+}
+
+/** 匯入每月應繳報表時選過的帳單項目對應（例如「年繳沖銷」→ 沖銷，從預收款扣除），可修改、刪除、新增。 */
+function BillItemMapEditor() {
+  const { data, update } = useStore();
+  const s = data.settings;
+  const map = s.billItemMap ?? {};
+  const entries = Object.entries(map).sort((a, b) => a[0].localeCompare(b[0], 'zh-Hant'));
+  const feeItems = feeItemNames(s);
+  const [name, setName] = useState('');
+  const [target, setTarget] = useState('');
+  const [msg, setMsg] = useState('');
+  const save = (next: Record<string, string>, action: string, detail: string) =>
+    update((d) => ({ ...d, settings: { ...d.settings, billItemMap: next } }), action, detail);
+  const options = (current: string) => (
+    <>
+      <optgroup label="基準費率的繳費項目">
+        {current && !feeItems.includes(current) && !SPECIAL_TARGETS.includes(current) && <option value={current}>{current}（已不存在）</option>}
+        {feeItems.map((f) => <option key={f} value={f}>{f}</option>)}
+      </optgroup>
+      {SPECIAL_TARGETS.map((t) => <option key={t} value={t}>{billTargetLabel(t)}</option>)}
+    </>
+  );
+
+  function add() {
+    const v = name.trim();
+    if (!v || !target) return;
+    if (map[v]) return setMsg(`「${v}」已經有對應，請直接在上面修改`);
+    save({ ...map, [v]: target }, '新增帳單項目對應', `${v}→${target}`);
+    setName('');
+    setTarget('');
+    setMsg('');
+  }
+
+  return (
+    <Section title={`帳單項目對應（${entries.length}）`}>
+      <p className="hint">
+        匯入「每月應繳報表」時，帳單上的項目要選擇對應到哪裡，選過的會記在這裡，下次匯入自動套用。
+        例如「年繳沖銷」對應到「沖銷」，就會從這戶的預收款扣除；「未繳管理費」對應到「逾期」。
+        名稱和繳費項目完全相同的不用設定，會自動對應；不同的（例如帳單「腳踏車清潔費」對應方案「腳踏車位清潔費」）也記在這裡。修改或刪除只影響之後的匯入；已匯入的月份要重新匯入一次才會套用。刪除後下次匯入會再請你選擇。
+      </p>
+      <table className="compact-inputs status-table bill-map-table">
+        <thead><tr><th>帳單項目</th><th>對應到</th><th></th></tr></thead>
+        <tbody>
+          {entries.map(([k, v]) => (
+            <tr key={k}>
+              <td>{k}</td>
+              <td>
+                <select value={v} onChange={(e) => save({ ...map, [k]: e.target.value }, '修改帳單項目對應', `${k}→${e.target.value}`)}>
+                  {options(v)}
+                </select>
+              </td>
+              <td><button className="link danger" onClick={() => confirm(`刪除「${k}」的對應？下次匯入時會再請你選擇。`) && save(Object.fromEntries(entries.filter(([x]) => x !== k)), '刪除帳單項目對應', k)}>刪除</button></td>
+            </tr>
+          ))}
+          <tr className="add-row">
+            <td><input placeholder="帳單項目，例如 預繳沖銷" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => isEnterKey(e) && add()} /></td>
+            <td>
+              <select value={target} onChange={(e) => setTarget(e.target.value)}>
+                <option value="">— 請選擇 —</option>
+                {options('')}
+              </select>
+            </td>
+            <td><button onClick={add} disabled={!name.trim() || !target}>新增</button></td>
+          </tr>
+        </tbody>
+      </table>
+      {entries.length === 0 && <p className="empty">還沒有對應紀錄，第一次匯入每月應繳報表時會請你選擇。</p>}
+      {msg && <p className="hint">{msg}</p>}
+    </Section>
   );
 }
 
@@ -250,7 +326,12 @@ function CategoryTable({ kind, title }: { kind: 'income' | 'expense' | 'petty'; 
       <h3 className="sub-title">{title}（{list.length + (petty ? 1 : 0)}）</h3>
       {kind === 'income' && (
         <label className="check fee-fixed">
-          <input type="checkbox" checked={fixed.has(FEE_SUBJECT)} onChange={() => toggleFixed(FEE_SUBJECT)} /> 管理費收入（匯入的繳費）列為固定收入
+          <input type="checkbox" checked={fixed.has(FEE_SUBJECT)} onChange={() => toggleFixed(FEE_SUBJECT)} /> 匯入的管理費：本期收入列為固定收入
+        </label>
+      )}
+      {kind === 'income' && (
+        <label className="check fee-fixed">
+          <input type="checkbox" checked={fixed.has(FEE_OTHER_FIXED)} onChange={() => toggleFixed(FEE_OTHER_FIXED)} /> 匯入的管理費：逾期、預收、暫收也列為固定收入
         </label>
       )}
       <table className="compact-inputs category-table">

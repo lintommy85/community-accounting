@@ -1,6 +1,6 @@
 import { allocateAll, dueFor } from './allocation';
 import { addMonths, monthEnd } from './dates';
-import { DueRow, normUnit, PRIOR_ITEM, splitAmount } from './dues';
+import { DueRow, normUnit, PREPAID_BEFORE_ITEM, PRIOR_ITEM, splitAmount } from './dues';
 import { activeUnits, cycleMonths, feeItemNames, isCycleStart, mainItemName, mainItemNames, setUnitItemBaseline, unitBaselines } from './fees';
 import { AppData, Due, Settings, Unit } from './types';
 
@@ -13,8 +13,7 @@ export const BILL_PREPAID = '__prepaid__';
 /** 帳單內含逾期在應繳中的紀錄名稱（金額 0，只保留帳單金額）。 */
 export const ARREARS_ITEM = '帳單內含逾期';
 export const PREPAID_ITEM = '預繳沖銷';
-/** 系統沒有這戶的預繳款（例如啟用本系統前預繳）時，沖銷照帳單減少應繳。 */
-export const PREPAID_BEFORE_ITEM = '預繳沖銷（啟用前預繳）';
+export { PREPAID_BEFORE_ITEM };
 
 /** 去掉智生活項目名稱前的年月，例如「11月坪數費」→「坪數費」、「115年1~12月管理費」→「管理費」、「10月未繳管理費」→「未繳管理費」。 */
 export const billItemName = (item: string) => item.replace(/^\s*(\d{2,3}\s*年\s*)?\d{1,2}\s*([-~～至到]\s*\d{1,2}\s*)?月(份)?\s*/, '').trim() || item.trim();
@@ -27,6 +26,10 @@ export function itemMonthSpan(item: string): number {
   if (a < 1 || a > 12 || b < 1 || b > 12) return 0;
   return ((b - a + 12) % 12) + 1;
 }
+
+/** 帳單項目對應目標的說明文字。 */
+export const billTargetLabel = (t: string) =>
+  t === BILL_ARREARS ? '逾期（帳單內含，不列應繳）' : t === BILL_PREPAID ? '沖銷（從這戶的預收款扣除）' : t === BILL_ASIS ? '照帳單（減免等，不比對基準）' : `繳費項目：${t}`;
 
 /** 還沒對應的帳單項目的建議：名稱相同的繳費項目、逾期、照帳單；猜不到回傳空字串。 */
 export function suggestBillItem(name: string, feeItems: string[]): string {
