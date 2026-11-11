@@ -117,6 +117,14 @@ export interface Settings {
   renovation?: RenovationSettings;
   /** 逾期款項的報表科目是否合併成一筆（科目 → 是否合併；沒設定為合併）。 */
   arrearsMerge?: Record<string, boolean>;
+  /** 到期提醒：到期（或申報期限）前幾個月開始高亮提醒；沒設定時合約、設備證書 3 個月，政府申報 6 個月。 */
+  reminders?: Partial<ReminderMonths>;
+}
+
+export interface ReminderMonths {
+  contracts: number;
+  assets: number;
+  filings: number;
 }
 
 export interface MonthAmount {
@@ -294,6 +302,57 @@ export interface Renovation {
   settlement?: RenovationSettlement;
 }
 
+/** 合約、設備證書、政府申報的修改紀錄：每次儲存記一筆當時的到期日（或申報完成月份）與修改時間。 */
+export interface TrackRecord {
+  id: string;
+  /** 修改時間（ISO）。 */
+  at: string;
+  /** 當時的合約到期日、設備證書到期日（YYYY-MM-DD）或最近一次申報月份（YYYY-MM）。 */
+  value: string;
+  /** 其他內容摘要，例如廠商與金額。 */
+  detail: string;
+}
+
+export type ContractCycle = 'month' | 'quarter' | 'half' | 'year';
+
+/** 簽約廠商的合約：合約金額依帳務週期計，到期前 3 個月提醒。 */
+export interface Contract {
+  id: string;
+  /** 合約項目，例如保全服務、電梯保養。 */
+  title: string;
+  vendor: string;
+  amount: number;
+  cycle: ContractCycle;
+  startDate: string;
+  endDate: string;
+  note: string;
+  /** 到期不續約：到了提醒時間也不高亮提醒。 */
+  noRenew?: boolean;
+  history: TrackRecord[];
+}
+
+/** 有有效期的設備或需要定期更新的證書，到期前 3 個月提醒。 */
+export interface AssetItem {
+  id: string;
+  kind: 'equipment' | 'certificate';
+  name: string;
+  expiry: string;
+  note: string;
+  history: TrackRecord[];
+}
+
+/** 政府固定申報項目：每 everyYears 年一次，dueMonth 月底前要完成；到期前半年提醒。 */
+export interface Filing {
+  id: string;
+  name: string;
+  everyYears: number;
+  dueMonth: number;
+  /** 最近一次申報完成的月份（YYYY-MM），還沒填時空白。 */
+  lastMonth: string;
+  note: string;
+  history: TrackRecord[];
+}
+
 export interface MonthClose {
   month: string;
   closedAt: string;
@@ -323,6 +382,12 @@ export interface AppData {
   renovations: Renovation[];
   /** 建立系統前已收的裝潢保證金。 */
   renovationOpenings?: RenovationOpening[];
+  /** 合約管理。 */
+  contracts?: Contract[];
+  /** 財產管理：設備與證書。 */
+  assets?: AssetItem[];
+  /** 財產管理：政府申報（第一次載入時預先建立透保水檢查、消防申報、公安申報）。 */
+  filings?: Filing[];
   /** 逾期款項歸類的報表科目：逾期款項的鍵（繳款 id｜月份｜項目）→ 科目，例如「10月逾期汽車清潔費」。 */
   arrearsLabels?: Record<string, string>;
 }

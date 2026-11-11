@@ -1,4 +1,4 @@
-import { Account, AppData, FieldKey, SCHEMA_VERSION, Settings } from './types';
+import { Account, AppData, FieldKey, Filing, SCHEMA_VERSION, Settings } from './types';
 
 export function newId(prefix = ''): string {
   const rand = Math.random().toString(36).slice(2, 8);
@@ -86,6 +86,9 @@ export function emptyData(): AppData {
     renovations: [],
     renovationOpenings: [],
     arrearsLabels: {},
+    contracts: [],
+    assets: [],
+    filings: presetFilings(),
   };
 }
 
@@ -141,4 +144,13 @@ export function parseAmount(value: unknown): number {
   const n = Number(s);
   if (!Number.isFinite(n)) return 0;
   return negative ? -n : n;
+}
+
+/** 預先載入的政府申報；週期與期限是一般規定，各縣市公告不同時請自行修改。 */
+export function presetFilings(): Filing[] {
+  return [
+    { id: 'fl_water', name: '透保水檢查', everyYears: 1, dueMonth: 4, lastMonth: '', note: '透水保水設施每年委託專業技術團體檢查一次（新北市規定每年 5 月 1 日前完成）', history: [] },
+    { id: 'fl_fire', name: '消防申報', everyYears: 1, dueMonth: 12, lastMonth: '', note: '消防安全設備檢修申報：集合住宅（甲類以外）每年一次，申報月份依當地消防局排定，請改成實際月份', history: [] },
+    { id: 'fl_safety', name: '公安申報', everyYears: 3, dueMonth: 3, lastMonth: '', note: '建築物公共安全檢查簽證申報：H-2 集合住宅 8～15 層每 3 年、6～7 層每 4 年，申報期間 1 月 1 日至 3 月 31 日（依當地主管機關公告）', history: [] },
+  ];
 }

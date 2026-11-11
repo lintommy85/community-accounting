@@ -1,4 +1,4 @@
-import { defaultAccounts, defaultSettings, emptyData, fileBase, withPettyOther } from './defaults';
+import { defaultAccounts, defaultSettings, emptyData, fileBase, presetFilings, withPettyOther } from './defaults';
 import { AppData, SCHEMA_VERSION } from './types';
 
 const DB_NAME = 'community-accounting';
@@ -59,6 +59,9 @@ export function normalizeData(raw: unknown): AppData {
     renovations: src.renovations ?? [],
     renovationOpenings: src.renovationOpenings ?? [],
     arrearsLabels: src.arrearsLabels ?? {},
+    contracts: src.contracts ?? [],
+    assets: src.assets ?? [],
+    filings: src.filings ?? presetFilings(),
   };
 }
 

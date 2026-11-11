@@ -8,6 +8,7 @@ import { todayStr } from '../lib/dates';
 import { resolveDepositAccountId } from '../lib/defaults';
 import { activeUnits, unitBaseline } from '../lib/fees';
 import { accountBalances, depositGroups, monthReport } from '../lib/ledger';
+import { registryAlerts, reminderMonths } from '../lib/registry';
 import { useStore } from '../store';
 
 export default function Dashboard({ go }: { go: Go }) {
@@ -49,6 +50,11 @@ export default function Dashboard({ go }: { go: Go }) {
   if (overdue.length) todos.push({ text: `${overdue.length} 筆撥款已到預計日但尚未核對存摺`, page: 'deposits' });
   if (r.suspense > 0) todos.push({ text: `有 ${r.suspense.toLocaleString('zh-TW')} 元繳費的期別還沒有每月應繳（暫收款），請匯入對應月份的每月應繳報表`, page: 'import', arg: 'dues' });
   const prev = lastMonth();
+  const reg = registryAlerts(data);
+  const warn = reminderMonths(data.settings);
+  if (reg.contracts) todos.push({ text: `${reg.contracts} 份合約 ${warn.contracts} 個月內到期（或已到期），請續約後更新到期日；不續約的請勾「到期不續約」`, page: 'contracts' });
+  if (reg.assets) todos.push({ text: `${reg.assets} 項設備或證書 ${warn.assets} 個月內到期（或已過期），更新後請改到期日`, page: 'property' });
+  if (reg.filings) todos.push({ text: `${reg.filings} 項政府申報在 ${warn.filings} 個月內到期（或已逾期），申報完成後請更新最近一次申報月份`, page: 'property', arg: 'filings' });
   if (data.payments.length && !data.closes.some((c) => c.month === prev)) todos.push({ text: `${prev} 尚未月結`, page: 'month' });
 
   return (

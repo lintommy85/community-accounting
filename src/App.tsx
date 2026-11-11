@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { appTitle } from './lib/defaults';
 import { todayStr } from './lib/dates';
 import { depositGroups } from './lib/ledger';
+import { registryAlerts } from './lib/registry';
 import { useStore } from './store';
 import Dashboard from './pages/Dashboard';
 import ImportPage from './pages/ImportPage';
@@ -17,6 +18,8 @@ import LedgerPage from './pages/LedgerPage';
 import SettingsPage from './pages/SettingsPage';
 import BackupPage from './pages/BackupPage';
 import RenovationPage from './pages/RenovationPage';
+import ContractsPage from './pages/ContractsPage';
+import PropertyPage from './pages/PropertyPage';
 import FileBanner from './components/FileBanner';
 import GuideTour, { GUIDE_VERSION } from './components/GuideTour';
 import { Go, NavArgContext } from './components/nav';
@@ -28,6 +31,8 @@ const PAGES = [
   { key: 'petty', label: '零用金', desc: '零用金收支與每月撥補', el: PettyCashPage, icon: 'wallet', group: '日常記帳' },
   { key: 'renovation', label: '裝潢保證金', desc: '各戶裝潢保證金的收款、費率方案與結算退款', el: RenovationPage, icon: 'hammer', group: '日常記帳' },
   { key: 'accounts', label: '帳戶與轉帳', desc: '各帳戶餘額、變動紀錄與帳戶間轉帳', el: AccountsPage, icon: 'bank', group: '日常記帳' },
+  { key: 'contracts', label: '合約管理', desc: '簽約廠商、合約金額與帳務週期、合約到期日', el: ContractsPage, icon: 'contract', group: '合約與財產' },
+  { key: 'property', label: '財產管理', desc: '有效期的設備與證書、政府固定申報的期限', el: PropertyPage, icon: 'shield', group: '合約與財產' },
   { key: 'import', label: '匯入智生活報表', desc: '匯入每月應繳報表與管理費入帳報表', el: ImportPage, icon: 'upload', group: '管理費' },
   { key: 'payments', label: '繳費紀錄', desc: '住戶每一筆繳費與銷帳月份', el: PaymentsPage, icon: 'receipt', group: '管理費' },
   { key: 'deposits', label: '撥款對帳', desc: '拿存摺核對智生活撥入銀行的款項', el: DepositsPage, icon: 'check', group: '管理費' },
@@ -77,7 +82,13 @@ export default function App() {
   const today = todayStr();
   // 側欄徽章：已到預計撥款日、但還沒拿存摺核對的撥款筆數
   const overdueDeposits = useMemo(() => depositGroups(data.payments).filter((g) => g.depositDate <= today && !g.confirmed).length, [data.payments, today]);
-  const badges: Partial<Record<PageKey, { count: number; text: string }>> = { deposits: { count: overdueDeposits, text: '筆撥款還沒核對存摺' } };
+  // 合約、設備證書、政府申報快到期（或已過期）的筆數
+  const registry = useMemo(() => registryAlerts(data, today), [data.contracts, data.assets, data.filings, data.settings.reminders, today]);
+  const badges: Partial<Record<PageKey, { count: number; text: string }>> = {
+    deposits: { count: overdueDeposits, text: '筆撥款還沒核對存摺' },
+    contracts: { count: registry.contracts, text: '份合約快到期' },
+    property: { count: registry.assets + registry.filings, text: '項設備證書或政府申報快到期' },
+  };
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';

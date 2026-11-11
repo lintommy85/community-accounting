@@ -10,10 +10,11 @@ import { activeUnits, deletedUnits, extraItem, feeItemNames, MGMT_ITEM, sortUnit
 import { BILL_ARREARS, BILL_ASIS, BILL_DEPOSIT, BILL_FINE, BILL_PREPAID, billTargetLabel } from '../lib/bills';
 
 const SPECIAL_TARGETS: string[] = [BILL_PREPAID, BILL_ARREARS, BILL_ASIS, BILL_FINE, BILL_DEPOSIT];
-import { Account, PettyCashEntry, Settings, SignatureSlot } from '../lib/types';
+import { Account, PettyCashEntry, ReminderMonths, Settings, SignatureSlot } from '../lib/types';
 import { useStore } from '../store';
 import { FEE_OTHER_FIXED, FEE_SUBJECT } from '../lib/statement';
 import { renovationAfterCategoryRename, renovationSettings } from '../lib/renovation';
+import { MAX_REMINDER_MONTHS, reminderMonths } from '../lib/registry';
 import { moveItem, useDragReorder } from '../components/useDragReorder';
 
 
@@ -59,6 +60,8 @@ export default function SettingsPage({ go }: { go: (p: PageKey) => void }) {
       <DeletedUnits />
 
       <SignatureEditor slots={s.signatures} onSave={(signatures, detail) => set({ signatures }, '修改簽章欄', detail)} />
+
+      <ReminderEditor settings={s} onSave={(reminders, detail) => set({ reminders }, '修改到期提醒', detail)} />
 
       <Section title="收支科目">
         <p className="hint">按住左邊的 ⋮⋮ 上下拖拉調整順序；「收支記帳」選科目與報表都依這個順序排列。勾選「固定」的科目在列印的財務收支總表中列為固定收入／固定支出，其餘為非固定。改名時，未月結月份的分錄會一起改成新名稱。</p>
@@ -530,6 +533,48 @@ function DeletedUnits() {
           </div>
         </>
       )}
+    </Section>
+  );
+}
+
+/** 到期提醒：合約管理、設備與證書、政府申報各自在到期（或申報期限）前幾個月開始高亮提醒。 */
+function ReminderEditor({ settings, onSave }: { settings: Settings; onSave: (r: ReminderMonths, detail: string) => void }) {
+  const current = reminderMonths(settings);
+  const rows: { key: keyof ReminderMonths; label: string; hint: string }[] = [
+    { key: 'contracts', label: '合約管理', hint: '合約到期日前' },
+    { key: 'assets', label: '財產管理：設備與證書', hint: '到期日前' },
+    { key: 'filings', label: '財產管理：政府申報', hint: '申報期限月底前' },
+  ];
+  function change(key: keyof ReminderMonths, value: string, label: string) {
+    const n = Math.round(Number(value));
+    if (!Number.isFinite(n) || n < 1 || n > MAX_REMINDER_MONTHS || n === current[key]) return;
+    onSave({ ...current, [key]: n }, `${label} ${current[key]} → ${n} 個月`);
+  }
+  return (
+    <Section title="到期提醒">
+      <p className="hint">到了提醒時間，該項目在清單中會一直標成黃色，側欄顯示筆數、總覽列入待辦，直到更新到期日或最近一次申報月份。合約勾選「到期不續約」的不提醒。可設定 1～{MAX_REMINDER_MONTHS} 個月。</p>
+      <div className="form-row">
+        {rows.map((r) => (
+          <label key={r.key}>
+            {r.label}
+            <span className="inline-field">
+              {r.hint}
+              <input
+                type="number"
+                min={1}
+                max={MAX_REMINDER_MONTHS}
+                className="short-num"
+                defaultValue={current[r.key]}
+                key={current[r.key]}
+                onBlur={(e) => change(r.key, e.target.value, r.label)}
+                onKeyDown={(e) => isEnterKey(e) && e.currentTarget.blur()}
+                aria-label={`${r.label}提前幾個月提醒`}
+              />
+              個月開始提醒
+            </span>
+          </label>
+        ))}
+      </div>
     </Section>
   );
 }
