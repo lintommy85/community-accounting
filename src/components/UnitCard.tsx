@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { BEFORE_START_TEXT, cardMonths, dueFor, isOpeningPayment, summarizeUnit, UnitAccount } from '../lib/allocation';
+import { BEFORE_START_TEXT, cardMonths, chargeAmounts, chargeText, dueFor, isOpeningPayment, summarizeUnit, UnitAccount, unitChargeRows } from '../lib/allocation';
 import { withCommunity } from '../lib/defaults';
 import { ownerAt, ownerHistory } from '../lib/owners';
 import { Payment } from '../lib/types';
 import { useStore } from '../store';
 import AllocationEditor from './AllocationEditor';
 import { Money, thisMonth } from './ui';
+import { Icon } from './icons';
 
 const SOURCE_LABEL = { manual: '手動', period: '依期別', offset: '預收沖銷', auto: '自動' } as const;
 
@@ -20,12 +21,14 @@ export default function UnitCard({ account, startMonth, onBack }: { account: Uni
   const owners = ownerHistory(unit);
   const changed = owners.length > 1;
   const allocatedOf = (id: string) => account.allocations.filter((a) => a.paymentId === id).reduce((s, a) => s + a.amount, 0);
+  const chargeOf = (id: string) => account.chargePaid.filter((c) => c.paymentId === id).reduce((s, c) => s + c.amount, 0);
+  const chargeRows = unitChargeRows(account, data.entries);
 
   return (
     <>
       <div className="page-head no-print">
         <button onClick={onBack}>← 返回戶別列表</button>
-        <button className="primary" onClick={() => window.print()}>列印帳卡</button>
+        <button className="primary" onClick={() => window.print()}><Icon name="printer" />列印帳卡</button>
       </div>
       <section className="card">
         <h1 className="statement-title">{withCommunity(data.settings, '管理費帳卡')}</h1>
@@ -84,8 +87,11 @@ export default function UnitCard({ account, startMonth, onBack }: { account: Uni
                   <td>{p.paidDate}</td><td>{p.channel}</td><td>{p.billPeriod}</td>
                   <td className="num"><Money value={p.amount} /></td>
                   <td className="num"><Money value={allocated} /></td>
-                  <td className="num">{!before && p.amount - allocated ? <Money value={p.amount - allocated} /> : ''}</td>
-                  <td>{opening ? <span className="tag ok">期初預收款</span> : before ? <span className="tag" title="期別在帳務起始月之前，這些月份沒有應繳，不銷帳、不列預收或暫收">{BEFORE_START_TEXT}</span> : p.allocations ? <span className="tag warn">手動</span> : p.billPeriod ? <span className="tag">依期別</span> : <span className="tag">自動（先銷舊欠）</span>}</td>
+                  <td className="num">{!before && p.amount - allocated - chargeOf(p.id) ? <Money value={p.amount - allocated - chargeOf(p.id)} /> : ''}</td>
+                  <td>
+                    {opening ? <span className="tag ok">期初預收款</span> : before ? <span className="tag" title="期別在帳務起始月之前，這些月份沒有應繳，不銷帳、不列預收或暫收">{BEFORE_START_TEXT}</span> : p.allocations ? <span className="tag warn">手動</span> : p.billPeriod ? <span className="tag">依期別</span> : <span className="tag">自動（先銷舊欠）</span>}
+                    {chargeOf(p.id) > 0 && <span className="tag purple">{chargeText(chargeAmounts(account, p.id))}</span>}
+                  </td>
                   <td className="note-cell" title={p.note}>{p.note}</td>
                   <td className="no-print">{!opening && <button className="link" onClick={() => setEditing(p)}>調整銷帳</button>}</td>
                 </tr>
@@ -94,6 +100,29 @@ export default function UnitCard({ account, startMonth, onBack }: { account: Uni
           </tbody>
         </table>
         {account.feePayments.length === 0 && <p className="empty">沒有繳款紀錄。</p>}
+
+        {chargeRows.length > 0 && (
+          <>
+            <h2 className="statement-block">罰款與裝潢保證金</h2>
+            <p className="hint no-print">罰款、裝潢保證金不列入每月應繳，也不算欠費；繳款直接入帳。裝潢保證金請到「日常記帳 → 裝潢保證金」結算退款。</p>
+            <table className="report">
+              <thead><tr><th>月份</th><th>類型</th><th>項目</th><th className="num">帳單金額</th><th className="num">已繳</th><th className="num">未繳</th><th>繳款日</th></tr></thead>
+              <tbody>
+                {chargeRows.map((r, i) => (
+                  <tr key={`${r.month}|${r.kind}|${r.item}|${i}`}>
+                    <td>{r.month}</td>
+                    <td><span className={`tag ${r.kind === 'fine' ? 'danger' : 'purple'}`}>{r.kind === 'fine' ? '罰款' : '裝潢保證金'}</span></td>
+                    <td>{r.item}</td>
+                    <td className="num">{r.billed !== null ? <Money value={r.billed} /> : <span className="muted small">沒有帳單</span>}</td>
+                    <td className="num"><Money value={r.paid} /></td>
+                    <td className="num">{r.billed !== null && r.billed > r.paid ? <strong className="warn"><Money value={r.billed - r.paid} /></strong> : ''}</td>
+                    <td>{r.dates.join('、')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
       </section>
       {editing && <AllocationEditor payment={editing} account={account} startMonth={startMonth} onClose={() => setEditing(null)} />}
     </>

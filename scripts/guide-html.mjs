@@ -64,25 +64,24 @@ export function guideHtml(txt, version) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
 <style>
-:root { --ink: #1b2027; --muted: #6b7480; --line: #e7e9ed; --accent: #21b25b; --accent-strong: #15924a; --soft: #e8f7ee; --bg: #f5f6f8; --panel: #fff; --pre: #0f172a; color-scheme: light; }
-:root[data-theme="dark"] { --ink: #e5e8ec; --muted: #9aa3ae; --line: #2a3039; --accent: #2cbf66; --accent-strong: #4fd88a; --soft: rgba(44, 191, 102, 0.15); --bg: #0f1216; --panel: #171b21; --pre: #0b0d10; color-scheme: dark; }
+:root { --ink: #1f2933; --muted: #66727f; --line: #dde1e6; --accent: #1f6feb; --accent-strong: #1d4ed8; --soft: #e8f0fe; --bg: #f5f6f8; --panel: #fff; --pre: #0f172a; --head: linear-gradient(135deg, #1e3a8a, #2563eb); color-scheme: light; }
+:root[data-theme="dark"] { --ink: #e3e8ee; --muted: #9aa6b4; --line: #263140; --accent: #4c8dff; --accent-strong: #7fb0ff; --soft: rgba(47, 123, 245, 0.18); --bg: #0f141b; --panel: #161d26; --pre: #0a0e13; --head: linear-gradient(135deg, #14213d, #1e3a8a); color-scheme: dark; }
 * { box-sizing: border-box; }
 body { margin: 0; font-family: "Pretendard", "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif; color: var(--ink); background: var(--bg); line-height: 1.75; font-size: 16px; -webkit-font-smoothing: antialiased; }
-header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 28px 24px 22px; }
+header { background: var(--head); color: #fff; padding: 32px 24px 26px; }
 .head { max-width: 1040px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 header h1 { margin: 0; font-size: 26px; display: flex; align-items: center; gap: 12px; }
-header h1::before { content: ""; width: 12px; height: 28px; border-radius: 6px; background: var(--accent); }
-header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
-.theme { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; background: var(--panel); }
-.theme button { font: inherit; font-size: 13px; border: 0; background: none; color: var(--muted); padding: 4px 14px; border-radius: 999px; cursor: pointer; }
-.theme button.on { background: var(--soft); color: var(--accent-strong); font-weight: 700; }
+header p { margin: 4px 0 0; opacity: 0.85; font-size: 14px; }
+.theme { display: inline-flex; border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 999px; padding: 2px; background: rgba(255, 255, 255, 0.1); }
+.theme button { font: inherit; font-size: 13px; border: 0; background: none; color: rgba(255, 255, 255, 0.85); padding: 4px 14px; border-radius: 999px; cursor: pointer; }
+.theme button.on { background: #fff; color: #1e3a8a; font-weight: 700; }
 .wrap { max-width: 1040px; margin: 0 auto; padding: 24px 16px 60px; display: grid; grid-template-columns: 230px 1fr; gap: 24px; }
 nav { position: sticky; top: 16px; align-self: start; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px; max-height: calc(100vh - 32px); overflow-y: auto; }
 nav a { display: block; padding: 6px 10px; border-radius: 9px; color: var(--ink); text-decoration: none; font-size: 14px; }
 nav a:hover { background: var(--soft); color: var(--accent-strong); }
 section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; margin-bottom: 16px; }
 h2 { margin: 0 0 10px; font-size: 20px; display: flex; align-items: center; gap: 10px; }
-h2 .num { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: var(--soft); color: var(--accent-strong); font-size: 14px; }
+h2 .num { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 14px; }
 ol, ul { margin: 6px 0; padding-left: 1.6em; }
 li { margin: 4px 0; }
 li::marker { color: var(--accent); }
@@ -94,8 +93,8 @@ pre { background: var(--pre); color: #e2e8f0; padding: 14px 16px; border-radius:
 footer { text-align: center; color: var(--muted); font-size: 13px; }
 @media (max-width: 760px) { .wrap { grid-template-columns: 1fr; } nav { position: static; max-height: none; } }
 @media print {
-  :root, :root[data-theme="dark"] { --ink: #000; --muted: #444; --line: #ccc; --accent: #15924a; --accent-strong: #15924a; --soft: transparent; --bg: #fff; --panel: #fff; color-scheme: light; }
-  nav, .theme { display: none; } .wrap { display: block; } section { break-inside: avoid; border: 0; padding: 0 0 12px; } header { border: 0; padding: 0 0 12px; }
+  :root, :root[data-theme="dark"] { --ink: #000; --muted: #444; --line: #ccc; --accent: #1f6feb; --accent-strong: #1d4ed8; --soft: transparent; --bg: #fff; --panel: #fff; color-scheme: light; }
+  nav, .theme { display: none; } .wrap { display: block; } section { break-inside: avoid; border: 0; padding: 0 0 12px; } header { color: #000; background: none; padding: 0 0 12px; }
 }
 </style>
 </head>

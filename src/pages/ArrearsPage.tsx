@@ -4,6 +4,7 @@ import type { Go } from '../components/nav';
 import HouseholdSetup from '../components/HouseholdSetup';
 import UnitCard from '../components/UnitCard';
 import { Money, Section, thisMonth } from '../components/ui';
+import { Icon } from '../components/icons';
 import { allocateAll, dueFor, summarizeUnit, UnitSummary } from '../lib/allocation';
 import { addMonths, monthRange } from '../lib/dates';
 import { fileBase, withCommunity } from '../lib/defaults';
@@ -70,9 +71,9 @@ export default function ArrearsPage({ go }: { go: Go }) {
     <>
       <div className="page-head no-print">
         <h1>欠費／銷帳</h1>
-        <div className="actions">
-          <button className={view === 'units' ? 'primary' : ''} onClick={() => setView('units')}>戶別明細</button>
-          <button className={view === 'matrix' ? 'primary' : ''} onClick={() => setView('matrix')}>月份總表</button>
+        <div className="seg" role="tablist">
+          <button role="tab" aria-selected={view === 'units'} className={view === 'units' ? 'primary' : ''} onClick={() => setView('units')}>戶別明細</button>
+          <button role="tab" aria-selected={view === 'matrix'} className={view === 'matrix' ? 'primary' : ''} onClick={() => setView('matrix')}>月份總表</button>
         </div>
       </div>
 
@@ -97,7 +98,7 @@ export default function ArrearsPage({ go }: { go: Go }) {
             <input type="month" value={to} onChange={(e) => e.target.value && setTo(e.target.value)} />
             <input placeholder="搜尋戶別／所有權人" value={q} onChange={(e) => setQ(e.target.value)} />
             <label className="check"><input type="checkbox" checked={onlyOwing} onChange={(e) => setOnlyOwing(e.target.checked)} /> 只顯示欠繳戶</label>
-            <button onClick={() => downloadBlob(exportUnitSummaries(data, shown, from, to), `${fileBase(s)}-戶別繳費明細-${from}_${to}.xlsx`)}>匯出 Excel</button>
+            <button onClick={() => downloadBlob(exportUnitSummaries(data, shown, from, to), `${fileBase(s)}-戶別繳費明細-${from}_${to}.xlsx`)}><Icon name="download" />匯出 Excel</button>
           </div>
         }
       >
@@ -125,7 +126,7 @@ export default function ArrearsPage({ go }: { go: Go }) {
                     <td>{r.lastPaidDate}</td>
                     <td className="row-actions">
                       <button className="link" onClick={() => setCardKey(r.account.key)}>帳卡</button>
-                      {r.owing > 0 && <button className="link" onClick={() => setNotice(r)}>催繳單</button>}
+                      {r.owing > 0 && <button className="link danger" onClick={() => setNotice(r)}>催繳單</button>}
                     </td>
                   </tr>
                 ))}
@@ -187,7 +188,7 @@ function Notice({ summary, onBack }: { summary: UnitSummary; onBack: () => void 
     <>
       <div className="no-print page-head">
         <button onClick={onBack}>← 返回</button>
-        <button className="primary" onClick={() => window.print()}>列印催繳通知</button>
+        <button className="primary" onClick={() => window.print()}><Icon name="printer" />列印催繳通知</button>
       </div>
       <div className="notice">
         <h1>{withCommunity(data.settings, '管理費繳費通知')}</h1>

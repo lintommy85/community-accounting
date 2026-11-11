@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Section } from '../components/ui';
+import { FileDrop, Section } from '../components/ui';
+import { Icon } from '../components/icons';
 import { emptyData } from '../lib/defaults';
 import { backupFileName, downloadBlob, listServiceBackups, normalizeData, openServiceDataDir, toBackupJson } from '../lib/storage';
 import { exportAllToExcel } from '../lib/xlsxio';
@@ -76,17 +77,14 @@ export default function BackupPage() {
 
       <Section title="備份">
         <div className="form-row">
-          <button className="primary" onClick={downloadBackup}>下載完整備份（.json，可還原）</button>
-          <button onClick={() => downloadBlob(exportAllToExcel(data), backupFileName(data, 'xlsx'))}>匯出全部資料為 Excel（交接／查閱用）</button>
+          <button className="primary" onClick={downloadBackup}><Icon name="download" />下載完整備份（.json，可還原）</button>
+          <button onClick={() => downloadBlob(exportAllToExcel(data), backupFileName(data, 'xlsx'))}><Icon name="download" />匯出全部資料為 Excel（交接／查閱用）</button>
         </div>
         <p className="hint">完整備份包含所有繳費紀錄、收支分錄、戶別、帳戶、通路規則、欄位對應、月結紀錄與操作紀錄。建議每次月結後下載一份，並另存到隨身碟或雲端。</p>
       </Section>
 
       <Section title="還原">
-        <label className="drop">
-          <input type="file" accept=".json" onChange={(e) => { restore(e.target.files?.[0]); e.target.value = ''; }} />
-          <span>選擇備份檔（.json）或資料檔來還原</span>
-        </label>
+        <FileDrop title="選擇備份檔或資料檔來還原" hint="副檔名是 .json，也可以把檔案拖曳到這裡" accept=".json" onFile={restore} />
       </Section>
 
       <Section title="匯入紀錄">

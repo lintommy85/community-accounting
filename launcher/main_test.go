@@ -123,3 +123,37 @@ func TestShutdownRequiresHeaderAndExits(t *testing.T) {
 		t.Fatalf("info should expose build id: %s", rec.Body)
 	}
 }
+
+func TestAppBrowserPrefersEdgeThenChrome(t *testing.T) {
+	env := map[string]string{
+		"ProgramFiles(x86)": filepath.FromSlash("/pf86"),
+		"ProgramFiles":      filepath.FromSlash("/pf"),
+		"LOCALAPPDATA":      filepath.FromSlash("/local"),
+	}
+	getenv := func(k string) string { return env[k] }
+	has := func(files ...string) func(string) bool {
+		set := map[string]bool{}
+		for _, f := range files {
+			set[f] = true
+		}
+		return func(p string) bool { return set[p] }
+	}
+	edge := filepath.Join(env["ProgramFiles(x86)"], filepath.FromSlash("Microsoft/Edge/Application/msedge.exe"))
+	edgeNew := filepath.Join(env["ProgramFiles"], filepath.FromSlash("Microsoft/Edge/Application/msedge.exe"))
+	chromeUser := filepath.Join(env["LOCALAPPDATA"], filepath.FromSlash("Google/Chrome/Application/chrome.exe"))
+	cases := []struct {
+		name  string
+		files []string
+		want  string
+	}{
+		{"Edge 優先於 Chrome", []string{chromeUser, edge}, edge},
+		{"Edge 裝在 Program Files", []string{edgeNew}, edgeNew},
+		{"沒有 Edge 時用只裝給使用者的 Chrome", []string{chromeUser}, chromeUser},
+		{"都沒有時交給預設瀏覽器", nil, ""},
+	}
+	for _, c := range cases {
+		if got := appBrowser(getenv, has(c.files...)); got != c.want {
+			t.Errorf("%s：得到 %q，應該是 %q", c.name, got, c.want)
+		}
+	}
+}

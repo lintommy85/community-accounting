@@ -1,5 +1,7 @@
 import { addMonths, monthEnd, monthRange } from './dates';
-import { allocateAll, receiptBreakdown, receiptBreakdownBy } from './allocation';
+import { AllocationResult, allocateAll, receiptBreakdown, receiptBreakdownBy } from './allocation';
+import { FINE_LABEL, renovationSettings } from './renovation';
+import { arrearsLines, arrearsReportLines } from './arrears';
 import { resolveDepositAccountId } from './defaults';
 import { AccountBalance, accountBalances, active, advancesFor, inTransitAt, netAmount } from './ledger';
 import { Account, AppData, SignatureSlot } from './types';
@@ -38,7 +40,8 @@ export const FEE_LABEL = '代收手續費';
 
 export const FEE_INCOME_LABEL = '管理費收入－管理費';
 
-function collect(data: AppData, p: Period, opts: StatementOptions) {
+function collect(data: AppData, p: Period, opts: StatementOptions, alloc: AllocationResult | null) {
+  const depositLabel = renovationSettings(data.settings).depositLabel;
   const { settings } = data;
   const fundOf = (accountId: string) => settings.accounts.find((a) => a.id === accountId)?.fund;
   const inFund = (accountId: string) => !opts.fund || fundOf(accountId) === opts.fund;
@@ -50,7 +53,11 @@ function collect(data: AppData, p: Period, opts: StatementOptions) {
     for (const pay of active(data.payments)) {
       const d = opts.basis === 'deposit' ? pay.depositDate : pay.paidDate;
       if (d < p.start || d > p.end) continue;
-      add(income, `管理費收入－${pay.item || '管理費'}`, pay.amount);
+      // 繳款中付罰款、裝潢保證金的部分另外列科目，不算管理費收入
+      const ch = alloc?.chargesByPayment.get(pay.id);
+      add(income, `管理費收入－${pay.item || '管理費'}`, pay.amount - (ch?.fine ?? 0) - (ch?.deposit ?? 0));
+      add(income, FINE_LABEL, ch?.fine ?? 0);
+      add(income, depositLabel, ch?.deposit ?? 0);
       add(expense, FEE_LABEL, pay.amount - netAmount(pay));
     }
   }
@@ -91,9 +98,8 @@ export const BREAKDOWN_LABELS = {
 } as const;
 
 /** 管理費收入全額列入收款當期，並附上依銷帳月份的拆解列。 */
-function feeBreakdownLines(data: AppData, periods: Period[], opts: StatementOptions): StatementLine[] {
-  if (!data.settings.units.some((u) => !u.deletedAt)) return [];
-  const alloc = allocateAll(data);
+function feeBreakdownLines(data: AppData, periods: Period[], opts: StatementOptions, alloc: AllocationResult | null): StatementLine[] {
+  if (!alloc) return [];
   const dateOf = opts.basis === 'deposit' ? (p: { depositDate: string }) => p.depositDate : undefined;
   const cols = periods.map((p) => receiptBreakdown(alloc, data.payments, p.start, p.end, dateOf));
   return (Object.keys(BREAKDOWN_LABELS) as (keyof typeof BREAKDOWN_LABELS)[])
@@ -102,7 +108,8 @@ function feeBreakdownLines(data: AppData, periods: Period[], opts: StatementOpti
 }
 
 export function buildStatement(data: AppData, periods: Period[], opts: StatementOptions): Statement {
-  const cols = periods.map((p) => collect(data, p, opts));
+  const alloc = data.settings.units.some((u) => !u.deletedAt) ? allocateAll(data) : null;
+  const cols = periods.map((p) => collect(data, p, opts, alloc));
   const lines = (kind: 'income' | 'expense', preferred: string[]) => {
     const labels = new Set<string>();
     cols.forEach((c) => c[kind].forEach((_, k) => labels.add(k)));
@@ -111,7 +118,7 @@ export function buildStatement(data: AppData, periods: Period[], opts: Statement
   const income: StatementLine[] = lines('income', data.settings.incomeCategories);
   const feeAt = income.findIndex((l) => l.label === FEE_INCOME_LABEL);
   if (feeAt >= 0 && (!opts.fund || data.settings.accounts.find((a) => a.id === resolveDepositAccountId(data.settings))?.fund === opts.fund)) {
-    income.splice(feeAt + 1, 0, ...feeBreakdownLines(data, periods, opts));
+    income.splice(feeAt + 1, 0, ...feeBreakdownLines(data, periods, opts, alloc));
   }
   const expense = lines('expense', [...data.settings.expenseCategories, FEE_LABEL]);
   const sum = (ls: StatementLine[]) => periods.map((_, i) => ls.reduce((s, l) => s + (l.sub ? 0 : l.values[i]), 0));
@@ -204,14 +211,34 @@ export function monthSheet(data: AppData, month: string): MonthSheet {
     amount && income.push({ subject: FEE_SUBJECT, item: text, month: label, note: '住戶', amount: Math.round(amount), fixed: current ? isFixed(FEE_SUBJECT, item) : fixed.has(FEE_OTHER_FIXED) });
 
   const itemOf = (p: { item: string }) => p.item || '管理費';
+  const depositLabel = renovationSettings(settings).depositLabel;
+  // 罰款、裝潢保證金與裝潢保證金的分錄：同一科目合併成一筆（不顯示戶別）
+  const merged = new Map<string, SheetLine & { type: 'income' | 'expense' }>();
+  const mergeLine = (type: 'income' | 'expense', subject: string, item: string, note: string, amount: number) => {
+    if (!amount) return;
+    const k = `${type}|${subject}`;
+    const prev = merged.get(k);
+    if (prev) prev.amount += amount;
+    else merged.set(k, { type, subject, item, month: label, note, amount, fixed: isFixed(subject, item) });
+  };
   if (settings.units.some((u) => !u.deletedAt)) {
-    const groups = receiptBreakdownBy(allocateAll(data), data.payments, start, end, itemOf);
+    const alloc = allocateAll(data);
+    for (const p of active(data.payments)) {
+      const ch = p.paidDate >= start && p.paidDate <= end ? alloc.chargesByPayment.get(p.id) : undefined;
+      if (!ch) continue;
+      mergeLine('income', FINE_LABEL, '罰款', '住戶', ch.fine);
+      mergeLine('income', depositLabel, depositLabel, '住戶', ch.deposit);
+    }
+    const groups = receiptBreakdownBy(alloc, data.payments, start, end, itemOf);
     for (const [item, b] of Array.from(groups).sort((a, b2) => a[0].localeCompare(b2[0], 'zh-Hant'))) {
       fee(item, `${item}收入`, b.current, true);
       fee(item, `${item}預收款`, b.prepaid);
-      fee(item, `逾期${item}`, b.arrears);
       fee(item, `${item}暫收款`, b.credit);
       fee(item, `${item}（未對應戶別）`, b.unmatched);
+    }
+    // 補繳以前月份（逾期）：依「逾期款項歸類」的科目列出，同一科目預設合併成一筆
+    for (const l of arrearsReportLines(arrearsLines(data, month, alloc), settings.arrearsMerge)) {
+      income.push({ subject: FEE_SUBJECT, item: l.label, month: label, note: '住戶', amount: Math.round(l.amount), fixed: fixed.has(FEE_OTHER_FIXED) });
     }
   } else {
     const byItem = new Map<string, number>();
@@ -222,10 +249,15 @@ export function monthSheet(data: AppData, month: string): MonthSheet {
   const expense: SheetLine[] = [];
   const entries = data.entries.filter((e) => e.date >= start && e.date <= end).sort((a, b) => a.date.localeCompare(b.date));
   for (const e of entries) {
+    if (e.renovationKind && (e.type === 'income' || e.type === 'expense')) {
+      mergeLine(e.type, e.category || '未分類', e.category || '', e.renovationKind === 'deposit' ? '住戶' : '', e.amount);
+      continue;
+    }
     const line = { subject: e.category || '未分類', item: e.note || e.category || '', month: label, note: e.counterparty, amount: e.amount, fixed: isFixed(e.category, e.note) };
     if (e.type === 'income') income.push(line);
     else if (e.type === 'expense') expense.push(line);
   }
+  for (const { type, ...line } of merged.values()) (type === 'income' ? income : expense).push({ ...line, amount: Math.round(line.amount) });
   const rank = (list: string[]) => (l: SheetLine) => (l.subject === FEE_SUBJECT ? -1 : list.includes(l.subject) ? list.indexOf(l.subject) : list.length);
   const byRank = (r: (l: SheetLine) => number) => (a: SheetLine, b: SheetLine) => r(a) - r(b);
   income.sort(byRank(rank(settings.incomeCategories)));

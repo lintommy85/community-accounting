@@ -6,13 +6,14 @@ import HouseholdSetup from '../components/HouseholdSetup';
 import { openGuide } from '../components/GuideTour';
 import Signatures from '../components/Signatures';
 import { MAX_SIGNATURES, newId, PETTY_OTHER, resolveDepositAccountId, withPettyOther } from '../lib/defaults';
-import { activeUnits, deletedUnits, feeItemNames, sortUnits } from '../lib/fees';
-import { BILL_ARREARS, BILL_ASIS, BILL_PREPAID, billTargetLabel } from '../lib/bills';
+import { activeUnits, deletedUnits, extraItem, feeItemNames, MGMT_ITEM, sortUnits } from '../lib/fees';
+import { BILL_ARREARS, BILL_ASIS, BILL_DEPOSIT, BILL_FINE, BILL_PREPAID, billTargetLabel } from '../lib/bills';
 
-const SPECIAL_TARGETS: string[] = [BILL_PREPAID, BILL_ARREARS, BILL_ASIS];
+const SPECIAL_TARGETS: string[] = [BILL_PREPAID, BILL_ARREARS, BILL_ASIS, BILL_FINE, BILL_DEPOSIT];
 import { Account, PettyCashEntry, Settings, SignatureSlot } from '../lib/types';
 import { useStore } from '../store';
 import { FEE_OTHER_FIXED, FEE_SUBJECT } from '../lib/statement';
+import { renovationAfterCategoryRename, renovationSettings } from '../lib/renovation';
 import { moveItem, useDragReorder } from '../components/useDragReorder';
 
 
@@ -76,13 +77,13 @@ export default function SettingsPage({ go }: { go: (p: PageKey) => void }) {
   );
 }
 
-/** 匯入每月應繳報表時選過的帳單項目對應（例如「年繳沖銷」→ 沖銷，從預收款扣除），可修改、刪除、新增。 */
+/** 帳單項目怎麼對應：已記錄的對應加上名稱相同的自動對應，一起列出對應到的繳費項目、費率方案與套用戶數；可修改、刪除、新增。 */
 function BillItemMapEditor() {
   const { data, update } = useStore();
   const s = data.settings;
   const map = s.billItemMap ?? {};
-  const entries = Object.entries(map).sort((a, b) => a[0].localeCompare(b[0], 'zh-Hant'));
   const feeItems = feeItemNames(s);
+  const units = activeUnits(s.units);
   const [name, setName] = useState('');
   const [target, setTarget] = useState('');
   const [msg, setMsg] = useState('');
@@ -98,6 +99,47 @@ function BillItemMapEditor() {
     </>
   );
 
+  // 已記錄的對應，加上和繳費項目同名、沒有另外記錄的（匯入時自動對應）
+  const rows: { bill: string; target: string; saved: boolean }[] = [
+    ...Object.entries(map).map(([bill, t]) => ({ bill, target: t, saved: true })),
+    ...feeItems.filter((f) => !(f in map)).map((f) => ({ bill: f, target: f, saved: false })),
+  ];
+  const kindOrder = (t: string) => (SPECIAL_TARGETS.includes(t) ? 1 + SPECIAL_TARGETS.indexOf(t) : 0);
+  const itemOrder = (t: string) => (feeItems.includes(t) ? feeItems.indexOf(t) : feeItems.length);
+  rows.sort((a, b) => kindOrder(a.target) - kindOrder(b.target) || itemOrder(a.target) - itemOrder(b.target) || a.bill.localeCompare(b.bill, 'zh-Hant'));
+
+  /** 繳費項目來自哪個費率方案、怎麼算、幾戶套用。 */
+  function planInfo(t: string): { plan: string; usage: string; missing?: boolean } {
+    if (t === BILL_ARREARS) return { plan: '不列為應繳，先對系統既有的欠款', usage: '' };
+    if (t === BILL_PREPAID) return { plan: '從這戶的預收款扣除（含期初預收款）', usage: '' };
+    if (t === BILL_ASIS) return { plan: '照帳單金額列入，不比對基準', usage: '' };
+    if (t === BILL_FINE) return { plan: '不列入應繳，只記在帳卡；繳款直接入帳，報表列「罰款收入」', usage: '' };
+    if (t === BILL_DEPOSIT) return { plan: '不列入應繳，只記在帳卡；繳款直接入帳，到「裝潢保證金」結算退款', usage: '' };
+    const plan = s.feePlans.find((x) => x.name === t);
+    if (plan) {
+      const main = units.filter((u) => u.planId === plan.id).length;
+      const extras = units.flatMap((u) => (u.extras ?? []).filter((e) => e.planId === plan.id));
+      const qty = extras.reduce((sum, e) => sum + (e.qty || 1), 0);
+      const usage = [main ? `主方案 ${main} 戶` : '', extras.length ? `加收 ${extras.length} 戶${qty !== extras.length ? `，共 ${qty} 個` : ''}` : ''].filter(Boolean).join('；');
+      return { plan: `${plan.name}（${plan.basis === 'area' ? `依坪數，每坪 ${plan.amount.toLocaleString('zh-TW')} 元` : `固定 ${plan.amount.toLocaleString('zh-TW')} 元`}）`, usage: usage || '還沒有戶別套用' };
+    }
+    if (t === MGMT_ITEM) {
+      const own = units.filter((u) => !u.planId && u.monthlyFee > 0).length;
+      return { plan: '主要費用：每戶的個別金額（和主方案視為同一項）', usage: own ? `個別金額 ${own} 戶` : '沒有個別金額的戶別' };
+    }
+    const custom = units.filter((u) => (u.extras ?? []).some((e) => !e.planId && extraItem(e, s.feePlans) === t)).length;
+    if (custom) return { plan: '自訂加收項目（沒有費率方案）', usage: `${custom} 戶` };
+    return { plan: '找不到這個繳費項目，請改對應或刪除', usage: '', missing: true };
+  }
+
+  const kindTag = (t: string) =>
+    t === BILL_ARREARS ? <span className="tag warn">逾期</span>
+      : t === BILL_PREPAID ? <span className="tag ok">沖銷</span>
+        : t === BILL_ASIS ? <span className="tag">照帳單</span>
+          : t === BILL_FINE ? <span className="tag danger">罰款</span>
+            : t === BILL_DEPOSIT ? <span className="tag purple">裝潢保證金</span>
+              : <span className="tag info">繳費項目</span>;
+
   function add() {
     const v = name.trim();
     if (!v || !target) return;
@@ -109,39 +151,58 @@ function BillItemMapEditor() {
   }
 
   return (
-    <Section title={`帳單項目對應（${entries.length}）`}>
+    <Section title={`帳單項目對應（${rows.length}）`}>
       <p className="hint">
-        匯入「每月應繳報表」時，帳單上的項目要選擇對應到哪裡，選過的會記在這裡，下次匯入自動套用。
-        例如「年繳沖銷」對應到「沖銷」，就會從這戶的預收款扣除；「未繳管理費」對應到「逾期」。
-        名稱和繳費項目完全相同的不用設定，會自動對應；不同的（例如帳單「腳踏車清潔費」對應方案「腳踏車位清潔費」）也記在這裡。修改或刪除只影響之後的匯入；已匯入的月份要重新匯入一次才會套用。刪除後下次匯入會再請你選擇。
+        匯入「每月應繳報表」時，帳單上的每個項目（去掉「11月」等月份）都會照這張表對應：對應到繳費項目的，跟這戶在「基準與費率」的該項基準比對；
+        對應到逾期、沖銷、照帳單、罰款、裝潢保證金的照右邊的方式處理（罰款、裝潢保證金不列入應繳，只記在那戶的帳卡）。和繳費項目同名的會自動對應（來源「自動」），名稱有「逾期」「未繳」「欠繳」「欠款」「前期」的（例如「逾期汽車清潔費」「10月逾期」）直接對應到逾期，不用選；其餘的在第一次匯入時選擇，選過的記在這裡（來源「已記錄」）。
+        修改或刪除只影響之後的匯入；已匯入的月份要重新匯入一次才會套用。刪除後下次匯入會再請你選擇。
       </p>
-      <table className="compact-inputs status-table bill-map-table">
-        <thead><tr><th>帳單項目</th><th>對應到</th><th></th></tr></thead>
-        <tbody>
-          {entries.map(([k, v]) => (
-            <tr key={k}>
-              <td>{k}</td>
+      <div className="table-wrap">
+        <table className="compact-inputs bill-map-table">
+          <thead><tr><th>帳單項目</th><th>類型</th><th>對應到</th><th>費率方案／處理方式</th><th>套用戶數</th><th>來源</th><th></th></tr></thead>
+          <tbody>
+            {rows.map((r) => {
+              const info = planInfo(r.target);
+              return (
+                <tr key={r.bill} className={info.missing ? 'attention' : ''}>
+                  <td><strong>{r.bill}</strong></td>
+                  <td>{kindTag(r.target)}</td>
+                  <td>
+                    <select value={r.target} onChange={(e) => save({ ...map, [r.bill]: e.target.value }, '修改帳單項目對應', `${r.bill}→${e.target.value}`)}>
+                      {options(r.target)}
+                    </select>
+                  </td>
+                  <td className={info.missing ? 'warn' : ''}>{info.plan}</td>
+                  <td className="muted">{info.usage}</td>
+                  <td>{r.saved ? <span className="tag ok">已記錄</span> : <span className="tag" title="帳單項目和繳費項目同名，匯入時自動對應">自動</span>}</td>
+                  <td>
+                    {r.saved && (
+                      <button className="link danger" onClick={() => confirm(`刪除「${r.bill}」的對應？${feeItems.includes(r.bill) ? '刪除後會改回自動對應到同名的繳費項目。' : '下次匯入時會再請你選擇。'}`) && save(Object.fromEntries(Object.entries(map).filter(([x]) => x !== r.bill)), '刪除帳單項目對應', r.bill)}>
+                        刪除
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            <tr className="add-row">
+              <td><input placeholder="帳單項目，例如 預繳沖銷" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => isEnterKey(e) && add()} /></td>
+              <td></td>
               <td>
-                <select value={v} onChange={(e) => save({ ...map, [k]: e.target.value }, '修改帳單項目對應', `${k}→${e.target.value}`)}>
-                  {options(v)}
+                <select value={target} onChange={(e) => setTarget(e.target.value)}>
+                  <option value="">— 請選擇 —</option>
+                  {options('')}
                 </select>
               </td>
-              <td><button className="link danger" onClick={() => confirm(`刪除「${k}」的對應？下次匯入時會再請你選擇。`) && save(Object.fromEntries(entries.filter(([x]) => x !== k)), '刪除帳單項目對應', k)}>刪除</button></td>
+              <td className="muted">{target ? planInfo(target).plan : ''}</td>
+              <td></td>
+              <td></td>
+              <td><button onClick={add} disabled={!name.trim() || !target}>新增</button></td>
             </tr>
-          ))}
-          <tr className="add-row">
-            <td><input placeholder="帳單項目，例如 預繳沖銷" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => isEnterKey(e) && add()} /></td>
-            <td>
-              <select value={target} onChange={(e) => setTarget(e.target.value)}>
-                <option value="">— 請選擇 —</option>
-                {options('')}
-              </select>
-            </td>
-            <td><button onClick={add} disabled={!name.trim() || !target}>新增</button></td>
-          </tr>
-        </tbody>
-      </table>
-      {entries.length === 0 && <p className="empty">還沒有對應紀錄，第一次匯入每月應繳報表時會請你選擇。</p>}
+          </tbody>
+        </table>
+      </div>
+      {rows.length === 0 && <p className="empty">還沒有繳費項目或對應紀錄。先到「戶別與月費 → 基準與費率」建立費率方案，第一次匯入每月應繳報表時會請你選擇其他項目的對應。</p>}
       {msg && <p className="hint">{msg}</p>}
     </Section>
   );
@@ -256,6 +317,7 @@ function CategoryTable({ kind, title }: { kind: 'income' | 'expense' | 'petty'; 
   const [name, setName] = useState('');
   const [msg, setMsg] = useState('');
   const fixed = new Set(data.settings.fixedCategories);
+  const reno = renovationSettings(data.settings);
   const toggleFixed = (c: string) =>
     update(
       (d) => ({
@@ -297,6 +359,7 @@ function CategoryTable({ kind, title }: { kind: 'income' | 'expense' | 'petty'; 
           ...d.settings,
           [field]: finish(list.map((c, j) => (j === i ? v : c))),
           fixedCategories: d.settings.fixedCategories.map((c) => (c === old ? v : c)),
+          renovation: petty ? d.settings.renovation : renovationAfterCategoryRename(d.settings, kind, old, v),
         },
         entries: petty ? d.entries : d.entries.map((e) => (e.type === kind && e.category === old && !isClosed(e.date) ? { ...e, category: v } : e)),
         pettyCash: petty
@@ -333,6 +396,16 @@ function CategoryTable({ kind, title }: { kind: 'income' | 'expense' | 'petty'; 
         <label className="check fee-fixed">
           <input type="checkbox" checked={fixed.has(FEE_OTHER_FIXED)} onChange={() => toggleFixed(FEE_OTHER_FIXED)} /> 匯入的管理費：逾期、預收、暫收也列為固定收入
         </label>
+      )}
+      {kind === 'expense' && (
+        <>
+          <label className="check fee-fixed">
+            <input type="checkbox" checked={fixed.has(reno.refundLabel)} onChange={() => toggleFixed(reno.refundLabel)} /> 裝潢保證金退款「{reno.refundLabel}」列為固定支出
+          </label>
+          <label className="check fee-fixed">
+            <input type="checkbox" checked={fixed.has(reno.feeLabel)} onChange={() => toggleFixed(reno.feeLabel)} /> 裝潢保證金退款手續費「{reno.feeLabel}」列為固定支出
+          </label>
+        </>
       )}
       <table className="compact-inputs category-table">
         <thead><tr><th></th><th>科目名稱</th>{!petty && <th title="月報表的「固定收入／固定支出」">固定</th>}<th className="num">使用筆數</th><th></th></tr></thead>

@@ -83,6 +83,9 @@ export function emptyData(): AppData {
     entries: [],
     closes: [],
     audit: [],
+    renovations: [],
+    renovationOpenings: [],
+    arrearsLabels: {},
   };
 }
 

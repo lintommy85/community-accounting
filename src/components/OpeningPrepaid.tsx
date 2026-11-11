@@ -55,11 +55,13 @@ export default function OpeningPrepaid() {
         <span>期初預收款合計 <Money value={total} strong /> 元，截至 {now} 已沖銷 <Money value={used} /> 元，剩餘 <Money value={total - used} strong /> 元。</span>
       </div>
       <div className="form-row">
+        <div className="seg">
         {(['all', 'offset', 'set'] as const).map((f) => (
           <button key={f} className={filter === f ? 'primary' : ''} onClick={() => setFilter(f)}>
             {f === 'all' ? `全部（${units.length}）` : f === 'offset' ? `沖銷沒有預收款（${units.filter((u) => offsetKeys.has(normUnit(u.unitNo))).length}）` : `已輸入（${withValue.length}）`}
           </button>
         ))}
+        </div>
         <input placeholder="搜尋戶別代碼或所有權人" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <div className="table-wrap">

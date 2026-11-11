@@ -1,4 +1,4 @@
-// 社區帳務管理啟動程式：在本機啟動服務、確保 data 資料夾存在，並開啟瀏覽器。
+// 社區帳務管理啟動程式：在本機啟動服務、確保 data 資料夾存在，並開啟系統畫面（Windows 以應用程式視窗開啟）。
 package main
 
 import (
@@ -438,10 +438,36 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// openBrowser 開啟系統畫面：Windows 用 Edge（沒有 Edge 時用 Chrome）的應用程式模式開啟，
+// 獨立視窗、沒有網址列與分頁，就像一般程式；兩者都找不到或無法啟動時才用預設瀏覽器。
 func openBrowser(url string) {
+	if runtime.GOOS == "windows" {
+		if exe := appBrowser(os.Getenv, fileExists); exe != "" && exec.Command(exe, "--app="+url).Start() == nil {
+			return
+		}
+	}
 	if err := openPath(url); err != nil {
 		alert("無法自動開啟瀏覽器，請手動開啟：" + url)
 	}
+}
+
+// appBrowser 依序找 Microsoft Edge、Google Chrome 的執行檔（安裝給所有人或只裝給目前使用者），找不到回傳空字串。
+func appBrowser(getenv func(string) string, exists func(string) bool) string {
+	for _, rel := range []string{"Microsoft/Edge/Application/msedge.exe", "Google/Chrome/Application/chrome.exe"} {
+		for _, env := range []string{"ProgramFiles(x86)", "ProgramFiles", "ProgramW6432", "LOCALAPPDATA"} {
+			if base := getenv(env); base != "" {
+				if p := filepath.Join(base, filepath.FromSlash(rel)); exists(p) {
+					return p
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
 }
 
 func openPath(target string) error {

@@ -257,7 +257,10 @@ describe('payments for bills before the billing start month', () => {
     expect(acc.beforeStart.size).toBe(1);
     expect(advancesFromAllocations(r, d.payments, '2026-11')).toEqual({ prepaid: 0, suspense: 0 });
     expect(summarizeUnit(acc, '2026-11', '2026-11').owing).toBe(2000);
-    expect(receiptBreakdown(r, d.payments, '2026-10-01', '2026-10-31').arrears).toBe(4000);
+    // 10 月繳 10 月的帳單算當期；11 月才補繳的才算補繳以前月份
+    expect(receiptBreakdown(r, d.payments, '2026-10-01', '2026-10-31')).toMatchObject({ current: 4000, arrears: 0 });
+    const late = fromNov([pay('A1-3F', '2026-11-03', 4000, '115年10月管理費')]);
+    expect(receiptBreakdown(allocateAll(late), late.payments, '2026-11-01', '2026-11-30')).toMatchObject({ current: 0, arrears: 4000 });
     expect(findAmountMismatches(d, new Set(d.payments.map((p) => p.id)))).toEqual([]);
   });
 

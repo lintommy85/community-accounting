@@ -24,11 +24,25 @@ export function Stat({ label, value, hint, tone, onClick, title, icon, color }: 
   label: string; value: number; hint?: string; tone?: 'warn' | 'ok'; onClick?: () => void; title?: string; icon?: IconName; color?: 'green' | 'blue' | 'purple' | 'yellow' | 'red' | 'gray';
 }) {
   return (
-    <div className={`stat ${tone ?? ''}${onClick ? ' clickable' : ''}`} onClick={onClick} role={onClick ? 'button' : undefined} title={onClick ? title ?? '查看帳戶變動紀錄' : undefined}>
+    <div className={`stat ${tone ?? ''}${color ? ` c-${color}` : ''}${onClick ? ' clickable' : ''}`} onClick={onClick} role={onClick ? 'button' : undefined} title={onClick ? title ?? '查看帳戶變動紀錄' : undefined}>
       <div className="stat-label">{icon && <span className={`stat-icon ${color ?? 'green'}`}><Icon name={icon} /></span>}{label}</div>
       <div className="stat-value">{formatMoney(value)}</div>
       {hint && <div className="stat-hint">{hint}</div>}
     </div>
+  );
+}
+
+/** 檔案選擇區：虛線框加圖示，點一下選檔案，或把檔案拖進來。 */
+export function FileDrop({ title, hint, accept, onFile }: { title: string; hint?: string; accept: string; onFile: (file: File | undefined) => void }) {
+  return (
+    <label className="drop">
+      <input type="file" accept={accept} onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }} />
+      <span className="drop-icon"><Icon name="upload" /></span>
+      <span className="drop-text">
+        <strong>{title}</strong>
+        {hint && <small>{hint}</small>}
+      </span>
+    </label>
   );
 }
 

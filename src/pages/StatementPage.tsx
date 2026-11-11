@@ -1,4 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import ArrearsPanel from '../components/ArrearsPanel';
+import ArrearsSheet from '../components/ArrearsSheet';
+import { arrearsLines } from '../lib/arrears';
 import FinanceSheet from '../components/FinanceSheet';
 import IncomeExpenseTable from '../components/IncomeExpenseTable';
 import PrepaidSheet from '../components/PrepaidSheet';
@@ -6,6 +9,7 @@ import Signatures from '../components/Signatures';
 import WriteOffSheet from '../components/WriteOffSheet';
 import { useNavArg } from '../components/nav';
 import { lastMonth, Money, MonthInput, Section } from '../components/ui';
+import { Icon } from '../components/icons';
 import { allocateAll, prepaidLedger } from '../lib/allocation';
 import { monthEnd } from '../lib/dates';
 import { withCommunity } from '../lib/defaults';
@@ -16,7 +20,7 @@ import { exportStatement } from '../lib/xlsxio';
 import { useStore } from '../store';
 
 type Mode = 'month' | 'year';
-type PrintMode = 'statement' | 'report' | 'writeoff' | 'prepaid';
+type PrintMode = 'statement' | 'report' | 'writeoff' | 'prepaid' | 'arrears';
 
 export default function StatementPage() {
   const { data } = useStore();
@@ -30,7 +34,13 @@ export default function StatementPage() {
   const [showDetail, setShowDetail] = useState(false);
   const [showPrepaid, setShowPrepaid] = useState(false);
   const hasUnits = data.settings.units.some((u) => !u.deletedAt);
-  const prepaid = useMemo(() => (mode === 'month' && hasUnits ? prepaidLedger(allocateAll(data), month) : null), [data, mode, month, hasUnits]);
+  const alloc = useMemo(() => (hasUnits ? allocateAll(data) : null), [data, hasUnits]);
+  const prepaid = useMemo(() => (mode === 'month' && alloc ? prepaidLedger(alloc, month) : null), [alloc, mode, month]);
+  // 本月繳款銷到以前月份的逾期款項：要先歸類報表科目才能列印月報
+  const arrears = useMemo(() => (mode === 'month' && alloc ? arrearsLines(data, month, alloc) : []), [data, alloc, mode, month]);
+  const unclassified = arrears.filter((l) => !l.label).length;
+  const arrearsRef = useRef<HTMLElement>(null);
+  const toArrears = () => arrearsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   const periods = mode === 'month' ? monthPeriods(month) : yearPeriods(year);
   const st = buildStatement(data, periods, { basis, fund });
@@ -45,6 +55,11 @@ export default function StatementPage() {
   const wide = mode === 'year';
 
   function print(m: PrintMode) {
+    if (m === 'report' && unclassified > 0) {
+      alert(`本月有 ${unclassified} 筆逾期款項還沒歸類報表科目，請先在「逾期款項」輸入科目（或套用建議名稱），才能列印月報。`);
+      toArrears();
+      return;
+    }
     setPrintMode(m);
     const reset = () => {
       setPrintMode('statement');
@@ -89,16 +104,23 @@ export default function StatementPage() {
             <option value="paid">依繳費日認列</option>
             <option value="deposit">依入帳日認列</option>
           </select>
-          <button onClick={() => downloadBlob(exportStatement(data, title, sub, st, pos), `${title.replace(/\s+/g, '-')}.xlsx`)}>匯出 Excel</button>
+          <button onClick={() => downloadBlob(exportStatement(data, title, sub, st, pos), `${title.replace(/\s+/g, '-')}.xlsx`)}><Icon name="download" />匯出 Excel</button>
           {r ? (
-            <button className="primary" onClick={() => print('report')} title="彩色「財務收支總表」：收入與支出左右並列，附帳戶匯總與簽章">列印月報</button>
+            <button className={unclassified ? 'primary blocked' : 'primary'} onClick={() => print('report')} title={unclassified ? `還有 ${unclassified} 筆逾期款項沒有歸類，不能列印` : '彩色「財務收支總表」：收入與支出左右並列，附帳戶匯總與簽章'}><Icon name="printer" />列印月報</button>
           ) : (
-            <button className="primary" onClick={() => print('statement')}>列印年報</button>
+            <button className="primary" onClick={() => print('statement')}><Icon name="printer" />列印年報</button>
           )}
-          {r?.writeOff && <button onClick={() => print('writeoff')}>列印管理費銷帳</button>}
-          {prepaid && <button onClick={() => print('prepaid')}>列印預收款項銷帳紀錄</button>}
+          {r?.writeOff && <button onClick={() => print('writeoff')}><Icon name="printer" />列印管理費銷帳</button>}
+          {prepaid && <button onClick={() => print('prepaid')}><Icon name="printer" />列印預收款項銷帳紀錄</button>}
+          {arrears.length > 0 && <button onClick={() => print('arrears')}><Icon name="printer" />列印逾期銷帳明細</button>}
         </div>
       </div>
+      {unclassified > 0 && (
+        <div className="banner err no-print">
+          <span><strong>本月有 {unclassified} 筆逾期款項還沒歸類報表科目，歸類前不能列印月報。</strong></span>
+          <button className="primary" onClick={toArrears}>前往歸類</button>
+        </div>
+      )}
 
       {r && (
         <div className="print-only print-report">
@@ -145,6 +167,15 @@ export default function StatementPage() {
         </table>
         <Signatures />
       </section>
+
+      {arrears.length > 0 && (
+        <>
+          <ArrearsPanel ref={arrearsRef} month={month} lines={arrears} onPrint={() => print('arrears')} />
+          <div className="print-only print-arrears">
+            <ArrearsSheet data={data} month={month} lines={arrears} />
+          </div>
+        </>
+      )}
 
       {r?.writeOff && (
         <>

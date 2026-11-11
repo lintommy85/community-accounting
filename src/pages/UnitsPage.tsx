@@ -120,10 +120,12 @@ export default function UnitsPage({ go }: { go: Go }) {
     <>
       <div className="page-head">
         <h1>戶別與月費</h1>
+        <div className="seg" role="tablist">
+          <button role="tab" aria-selected={tab === 'dues'} className={tab === 'dues' ? 'primary' : ''} onClick={() => setTab('dues')}>每月應繳</button>
+          <button role="tab" aria-selected={tab === 'units'} className={tab === 'units' ? 'primary' : ''} onClick={() => setTab('units')}>基準與費率</button>
+          <button role="tab" aria-selected={tab === 'prepaid'} className={tab === 'prepaid' ? 'primary' : ''} onClick={() => setTab('prepaid')}>期初預收款</button>
+        </div>
         <div className="actions">
-          <button className={tab === 'dues' ? 'primary' : ''} onClick={() => setTab('dues')}>每月應繳</button>
-          <button className={tab === 'units' ? 'primary' : ''} onClick={() => setTab('units')}>基準與費率</button>
-          <button className={tab === 'prepaid' ? 'primary' : ''} onClick={() => setTab('prepaid')}>期初預收款</button>
           <button onClick={() => go('import', 'dues')}>匯入每月應繳報表 →</button>
         </div>
       </div>

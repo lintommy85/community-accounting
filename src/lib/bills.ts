@@ -1,6 +1,6 @@
 import { allocateAll, dueFor } from './allocation';
 import { addMonths, monthEnd } from './dates';
-import { DueRow, normUnit, PREPAID_BEFORE_ITEM, PRIOR_ITEM, splitAmount } from './dues';
+import { BILL_DEPOSIT, BILL_FINE, billItemName, DueRow, normUnit, PREPAID_BEFORE_ITEM, PRIOR_ITEM, splitAmount } from './dues';
 import { activeUnits, cycleMonths, feeItemNames, isCycleStart, mainItemName, mainItemNames, setUnitItemBaseline, unitBaselines } from './fees';
 import { AppData, Due, Settings, Unit } from './types';
 
@@ -15,8 +15,7 @@ export const ARREARS_ITEM = '帳單內含逾期';
 export const PREPAID_ITEM = '預繳沖銷';
 export { PREPAID_BEFORE_ITEM };
 
-/** 去掉智生活項目名稱前的年月，例如「11月坪數費」→「坪數費」、「115年1~12月管理費」→「管理費」、「10月未繳管理費」→「未繳管理費」。 */
-export const billItemName = (item: string) => item.replace(/^\s*(\d{2,3}\s*年\s*)?\d{1,2}\s*([-~～至到]\s*\d{1,2}\s*)?月(份)?\s*/, '').trim() || item.trim();
+export { BILL_DEPOSIT, BILL_FINE, billItemName };
 
 /** 項目名稱寫的月份區間涵蓋幾個月，例如「1~12月管理費」→ 12、「11-1月」→ 3；沒有區間回傳 0。 */
 export function itemMonthSpan(item: string): number {
@@ -29,23 +28,48 @@ export function itemMonthSpan(item: string): number {
 
 /** 帳單項目對應目標的說明文字。 */
 export const billTargetLabel = (t: string) =>
-  t === BILL_ARREARS ? '逾期（帳單內含，不列應繳）' : t === BILL_PREPAID ? '沖銷（從這戶的預收款扣除）' : t === BILL_ASIS ? '照帳單（減免等，不比對基準）' : `繳費項目：${t}`;
+  t === BILL_ARREARS ? '逾期（帳單內含，不列應繳）'
+    : t === BILL_PREPAID ? '沖銷（從這戶的預收款扣除）'
+      : t === BILL_ASIS ? '照帳單（減免等，不比對基準）'
+        : t === BILL_FINE ? '罰款（不列應繳，記在帳卡）'
+          : t === BILL_DEPOSIT ? '裝潢保證金（不列應繳，記在帳卡）'
+            : `繳費項目：${t}`;
+
+/** 不列入應繳、繳款另外記在帳卡的對應（罰款、裝潢保證金）。 */
+export const isChargeTarget = (t: string | undefined) => t === BILL_FINE || t === BILL_DEPOSIT;
+
+/** 逾期類的帳單項目名稱，例如「逾期汽車清潔費」「10月逾期」「未繳管理費」「前期未繳」：匯入時直接對應到「逾期」。 */
+export const isArrearsName = (name: string) => /逾期|未繳|欠繳|欠款|前期/.test(name);
 
 /** 還沒對應的帳單項目的建議：名稱相同的繳費項目、逾期、照帳單；猜不到回傳空字串。 */
 export function suggestBillItem(name: string, feeItems: string[]): string {
   if (feeItems.includes(name)) return name;
-  if (/未繳|欠繳|欠款|前期/.test(name)) return BILL_ARREARS;
+  if (isArrearsName(name)) return BILL_ARREARS;
+  if (/保證金|裝潢押金|裝修押金/.test(name)) return BILL_DEPOSIT;
+  if (/罰款|罰金|違約金|違規/.test(name)) return BILL_FINE;
   if (/沖銷|預繳|預收|扣抵/.test(name)) return BILL_PREPAID;
   if (/減免|折讓|減收|退/.test(name)) return BILL_ASIS;
   const loose = (s: string) => s.replace(/位|費|清潔/g, '');
   return feeItems.find((f) => loose(f) && loose(f) === loose(name)) ?? '';
 }
 
-/** 帳單項目目前對應到哪裡：已儲存的對應優先，否則名稱和繳費項目相同時自動對應。 */
+/** 帳單項目目前對應到哪裡：已儲存的對應優先；否則名稱和繳費項目相同時自動對應，名稱是逾期類的直接對應到「逾期」。 */
 export function resolveBillItem(name: string, settings: Settings): string | undefined {
   const saved = settings.billItemMap?.[name];
   if (saved) return saved;
-  return feeItemNames(settings).includes(name) ? name : undefined;
+  if (feeItemNames(settings).includes(name)) return name;
+  return isArrearsName(name) ? BILL_ARREARS : undefined;
+}
+
+/**
+ * 匯入時要不要把帳務起始月往前改：只看帳單月份與一般的每月應繳。
+ * 帳單拆出的「前期欠款」（系統啟用前的欠款）、季繳年繳拆出的月份、罰款與裝潢保證金不算，它們不受起始月影響。
+ */
+export function earlierStartMonth(startSet: string, billMonths: string[], dues: Due[]): string {
+  if (!startSet) return '';
+  const months = [...billMonths, ...dues.filter((d) => !d.fromBill && d.kind !== 'fine' && d.kind !== 'deposit').map((d) => d.month)];
+  const earliest = months.reduce((m, x) => (!m || x < m ? x : m), '');
+  return earliest && earliest < startSet ? earliest : '';
 }
 
 export type BillFlag = 'noBase' | 'unset' | 'offCycle' | 'span' | 'below' | 'lessArrears' | 'prior';
@@ -206,12 +230,19 @@ export function planBillImport(
     const unit = units.get(key);
     const frozen = opts.rebase ? null : frozenBase(data.dues, key, month);
     let cycle = frozen?.cycle ?? unit?.cycle ?? 1;
-    const split: BillSplit = { unitNo, owner, month, cycle, bill: list.reduce((t, r) => t + r.amount, 0), base: 0, frozen: !!frozen, carried: 0, arrears: 0, prior: 0, prepaid: 0, prepaidBefore: 0, prepaidBalance: 0, autoPrepaid: 0, autoBalance: 0, flags: [] };
+    const split: BillSplit = { unitNo, owner, month, cycle, bill: list.filter((r) => !isChargeTarget(target.get(billItemName(r.item)))).reduce((t, r) => t + r.amount, 0), base: 0, frozen: !!frozen, carried: 0, arrears: 0, prior: 0, prepaid: 0, prepaidBefore: 0, prepaidBalance: 0, autoPrepaid: 0, autoBalance: 0, flags: [] };
     plan.splits.push(split);
     if (!unit) {
       split.flags.push('noBase');
       continue;
     }
+    // 罰款、裝潢保證金不列入應繳，只記帳單金額；整張帳單只有這些時，不比對基準也不動這個月的應繳
+    const charges = list.filter((r) => isChargeTarget(target.get(billItemName(r.item))));
+    for (const r of charges) {
+      const kind = target.get(billItemName(r.item)) === BILL_FINE ? 'fine' : 'deposit';
+      plan.rows.push({ unitNo, owner, month, item: billItemName(r.item), amount: 0, billAmount: r.amount, kind });
+    }
+    if (charges.length === list.length) continue;
     if (!frozen && !isCycleStart(unit, month)) {
       split.flags.push('offCycle');
       continue;
@@ -224,7 +255,7 @@ export function planBillImport(
     if (!frozen && cycle === 1) {
       // 月繳戶的帳單金額剛好是基準的 2、3、6、12 倍，或項目寫了月份區間：可能是一次開好幾個月的帳單
       const monthly = Array.from(unitBaselines(unit, plans).values()).reduce((t, v) => t + v, 0);
-      const feeTotal = list.filter((r) => { const t = target.get(billItemName(r.item)); return t !== BILL_ARREARS && t !== BILL_PREPAID && t !== BILL_ASIS; }).reduce((t, r) => t + r.amount, 0);
+      const feeTotal = list.filter((r) => { const t = target.get(billItemName(r.item)); return t !== BILL_ARREARS && t !== BILL_PREPAID && t !== BILL_ASIS && !isChargeTarget(t); }).reduce((t, r) => t + r.amount, 0);
       const byName = Math.max(0, ...list.map((r) => itemMonthSpan(r.item)));
       const byAmount = monthly > 0 && feeTotal > monthly && feeTotal % monthly === 0 ? feeTotal / monthly : 0;
       const n = [byName, byAmount].find((x) => [2, 3, 6, 12].includes(x)) ?? 0;
@@ -251,6 +282,7 @@ export function planBillImport(
     for (const r of list) {
       const name = billItemName(r.item);
       const t = target.get(name)!;
+      if (isChargeTarget(t)) continue;
       if (t === BILL_ARREARS) arrearsLines += r.amount;
       else if (t === BILL_PREPAID) prepaidLines += r.amount;
       else if (t === BILL_ASIS) asis.set(name, (asis.get(name) ?? 0) + r.amount);

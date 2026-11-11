@@ -30,7 +30,8 @@ export default function MonthDues({ go }: { go: Go }) {
     // 匯入時照帳單減少應繳的沖銷，之後有預收款就改由預收款沖銷，應繳恢復原額
     const switched = alloc.byKey.get(normUnit(u.unitNo))?.prepaidBeforeUsed.get(month) ?? 0;
     const due = current.reduce((sum, d) => sum + d.amount, 0) + switched;
-    const billRows = current.filter((d) => !d.fromBill);
+    // 罰款、裝潢保證金不列入應繳，也不算帳單內含的逾期
+    const billRows = current.filter((d) => !d.fromBill && d.kind !== 'fine' && d.kind !== 'deposit');
     const bill = billRows.reduce((sum, d) => sum + (d.billAmount ?? d.amount), 0);
     // 這張帳單拆出的應繳：本月份＋季繳／年繳的其他週期月份
     const covered = billRows.reduce((sum, d) => sum + d.amount, 0) + items.filter((d) => d.fromBill === month && d.item !== PRIOR_ITEM).reduce((sum, d) => sum + d.amount, 0);
@@ -88,13 +89,15 @@ export default function MonthDues({ go }: { go: Go }) {
                 <td>
                   <div className="due-items">
                     {r.current.map((d) => {
-                      const muted = d.kind === 'arrears' || d.kind === 'prepaid' || (d.item === PREPAID_BEFORE_ITEM && r.switched > 0);
+                      const charge = d.kind === 'fine' || d.kind === 'deposit';
+                      const muted = d.kind === 'arrears' || d.kind === 'prepaid' || charge || (d.item === PREPAID_BEFORE_ITEM && r.switched > 0);
                       const title = d.kind === 'arrears' ? '帳單內含逾期，不列應繳' : d.kind === 'prepaid' ? '由預收款銷帳，不減少應繳'
+                        : charge ? `${d.kind === 'fine' ? '罰款' : '裝潢保證金'}：不列入應繳，只記在帳卡`
                         : d.item === PREPAID_BEFORE_ITEM ? (r.switched >= -d.amount ? '已改由預收款沖銷，不減少應繳' : r.switched ? `其中 ${r.switched.toLocaleString('zh-TW')} 已改由預收款沖銷，其餘照帳單減少應繳` : '沒有預收款可以扣，照帳單減少應繳')
                         : d.billAmount !== undefined && d.billAmount !== d.amount ? `帳單 ${d.billAmount.toLocaleString('zh-TW')}` : undefined;
                       return (
                         <span key={d.id} className={`due-chip ${d.amount < 0 ? 'neg' : ''} ${muted ? 'muted' : ''}`} title={title}>
-                          {d.item} {(d.kind === 'arrears' || d.kind === 'prepaid' ? d.billAmount ?? 0 : d.amount).toLocaleString('zh-TW')}
+                          {d.item} {(d.kind === 'arrears' || d.kind === 'prepaid' || charge ? d.billAmount ?? 0 : d.amount).toLocaleString('zh-TW')}
                         </span>
                       );
                     })}

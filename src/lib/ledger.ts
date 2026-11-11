@@ -15,6 +15,13 @@ export function hashKey(s: string): string {
   return (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36);
 }
 
+/** 下一個傳票號碼：民國年-流水號（例如 115-0012）。 */
+export function nextVoucher(entries: LedgerEntry[], date: string): string {
+  const prefix = `${Number(date.slice(0, 4)) - 1911}-`;
+  const max = entries.filter((e) => e.voucherNo.startsWith(prefix)).reduce((m, e) => Math.max(m, Number(e.voucherNo.slice(prefix.length)) || 0), 0);
+  return `${prefix}${String(max + 1).padStart(4, '0')}`;
+}
+
 /** 撥入銀行的金額：優先採用報表的「入帳金額」，沒有時以繳費金額扣除手續費。 */
 export function netAmount(p: Payment): number {
   return p.depositAmount ?? p.amount - p.fee;

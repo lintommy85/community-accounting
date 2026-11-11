@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { isEnterKey, Money, MonthInput, Section, thisMonth } from '../components/ui';
+import { Icon } from '../components/icons';
 import { monthEnd, todayStr } from '../lib/dates';
 import { newId, PETTY_OTHER, resolveDepositAccountId } from '../lib/defaults';
 import { pettyLedger, pettyOfMonth, pettyTotal, replenishmentOf, upsertReplenishment } from '../lib/petty';
@@ -84,7 +85,7 @@ export default function PettyCashPage() {
         <h1>零用金</h1>
         <div className="actions">
           <MonthInput value={month} onChange={setMonth} />
-          <button onClick={() => window.print()}>列印</button>
+          <button onClick={() => window.print()}><Icon name="printer" />列印</button>
         </div>
       </div>
       <p className="hint no-print">

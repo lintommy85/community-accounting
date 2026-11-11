@@ -5,6 +5,8 @@ import {
   applyCycleUpdates,
   BILL_ARREARS,
   BILL_ASIS,
+  BILL_DEPOSIT,
+  BILL_FINE,
   BILL_PREPAID,
   billTargetLabel,
   BillSplit,
@@ -13,6 +15,7 @@ import {
   SpanDecision,
   planBillImport,
   suggestBillItem,
+  earlierStartMonth,
 } from '../lib/bills';
 import { newId } from '../lib/defaults';
 import { applyDueChanges, DueChangeStatus, detectWideLayout, diffDues, DueRow, dueRowsFromTable, dueRowsFromWide, UnitRow } from '../lib/dues';
@@ -23,7 +26,7 @@ import { readWorkbook, SheetGrid } from '../lib/xlsxio';
 import { useStore } from '../store';
 import FirstSetupGuide from './FirstSetupGuide';
 import type { Go } from './nav';
-import { Money, thisMonth } from './ui';
+import { FileDrop, Money, thisMonth } from './ui';
 
 /** 智生活的戶別 Id 只保留在資料中，不在畫面上顯示。 */
 const HIDDEN_COLUMN = /戶別\s*id/i;
@@ -105,8 +108,7 @@ export default function BillImport({ go }: { go?: Go }) {
   const unitChanges = unitPlan ? unitPlan.added + unitPlan.restored + unitPlan.excludedNow + unitPlan.fills + changeOwner.size : 0;
   // 帳單或已匯入的應繳早於帳務起始月：起始月一併往前改（比對逾期時也用新的起始月），否則那些月份不會銷帳
   const startSet = s.billingStartMonth;
-  const earliest = [...billRows.map((r) => r.month), ...data.dues.map((d) => d.month)].reduce((m, x) => (!m || x < m ? x : m), '');
-  const newStart = startSet && earliest && earliest < startSet ? earliest : '';
+  const newStart = earlierStartMonth(startSet, billRows.map((r) => r.month), data.dues);
   // 比對基準時先套用這次的排除／取消排除（新戶別還沒有基準，這次只建立戶別）
   const planData = useMemo(() => {
     const units = unitPlan ? applyUnitImport(s.units, unitPlan, new Set(), () => '').slice(0, s.units.length) : s.units;
@@ -264,10 +266,7 @@ export default function BillImport({ go }: { go?: Go }) {
         帳單上的沖銷項目（例如「年繳沖銷」「預繳沖銷」，各社區名稱可能不同，第一次匯入時對應到「沖銷」）不減少應繳，而是從這戶的預收款扣除（住戶年繳、預繳、溢繳的款項，含「期初預收款」）；預收款不夠時，不足的部分才照帳單減少應繳。
       </p>
       {firstTime && !table && <FirstSetupGuide go={go} here="import" />}
-      <label className="drop">
-        <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }} />
-        <span>選擇智生活管理費匯入範本（繳費單列表）Excel</span>
-      </label>
+      <FileDrop title="選擇智生活管理費匯入範本" hint="智生活後台「繳費單列表」匯出的 Excel，也可以把檔案拖曳到這裡" accept=".xlsx,.xls,.csv" onFile={onFile} />
       {msg && <p className={msg.startsWith('讀取失敗') ? 'err' : 'ok'}>{msg}</p>}
       {table && (
         <>
@@ -333,11 +332,13 @@ export default function BillImport({ go }: { go?: Go }) {
                   {skippedRows ? `（這次略過 ${skippedRows} 筆應繳）` : ''}。之後要加回，可以在這裡取消勾選，或到「基本設定 → 已排除的戶別」按「加回」。
                 </p>
                 <div className="form-row">
+                  <div className="seg">
                   {(['all', 'new', 'exclude'] as const).map((f) => (
                     <button key={f} className={unitFilter === f ? 'primary' : ''} onClick={() => setUnitFilter(f)}>
                       {f === 'all' ? '全部' : f === 'new' ? `新戶別（${unitPlan.added + unitPlan.rows.filter((r) => r.status === 'new' && r.exclude).length}）` : `排除（${unitPlan.rows.filter((r) => r.exclude).length}）`}
                     </button>
                   ))}
+                  </div>
                   <input placeholder="搜尋戶別代碼或所有權人" value={unitQ} onChange={(e) => setUnitQ(e.target.value)} />
                 </div>
                 <div className="table-wrap short">
@@ -431,6 +432,8 @@ export default function BillImport({ go }: { go?: Go }) {
                           <option value={BILL_ARREARS}>{targetLabel(BILL_ARREARS)}</option>
                           <option value={BILL_PREPAID}>{targetLabel(BILL_PREPAID)}</option>
                           <option value={BILL_ASIS}>{targetLabel(BILL_ASIS)}</option>
+                          <option value={BILL_FINE}>{targetLabel(BILL_FINE)}</option>
+                          <option value={BILL_DEPOSIT}>{targetLabel(BILL_DEPOSIT)}</option>
                         </select>
                       </td>
                     </tr>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import IncomeExpenseTable from '../components/IncomeExpenseTable';
 import type { Go } from '../components/nav';
 import { lastMonth, Money, MonthInput, Section } from '../components/ui';
+import { Icon } from '../components/icons';
 import { fileBase, formatMoney } from '../lib/defaults';
 import { monthReport, Totals } from '../lib/ledger';
 import { buildStatement, monthPeriods } from '../lib/statement';
@@ -59,7 +60,7 @@ export default function MonthReportPage({ go }: { go: Go }) {
         <h1>月結／在途存款</h1>
         <div className="actions">
           <MonthInput value={month} onChange={setMonth} />
-          <button onClick={() => downloadBlob(exportMonthReport(data, r), `${fileBase(data.settings)}-${month}-月報.xlsx`)}>匯出 Excel</button>
+          <button onClick={() => downloadBlob(exportMonthReport(data, r), `${fileBase(data.settings)}-${month}-月報.xlsx`)}><Icon name="download" />匯出 Excel</button>
           <button onClick={() => go('statement', month)}>列印月報／管理費銷帳 →</button>
           {closed ? <button onClick={reopen}>解除月結</button> : <button className="primary" onClick={closeMonth}>結帳鎖定</button>}
         </div>

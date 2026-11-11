@@ -113,6 +113,10 @@ export interface Settings {
   signatures: SignatureSlot[];
   /** 已看過的使用說明動畫版本；低於目前版本時開啟會自動播放。 */
   guideSeen?: number;
+  /** 裝潢保證金：費率方案與報表科目名稱。 */
+  renovation?: RenovationSettings;
+  /** 逾期款項的報表科目是否合併成一筆（科目 → 是否合併；沒設定為合併）。 */
+  arrearsMerge?: Record<string, boolean>;
 }
 
 export interface MonthAmount {
@@ -162,8 +166,11 @@ export interface Due {
    * fee 與基準比對的繳費項目；asis 照帳單（減免…）；arrears 帳單內含逾期（金額 0，只記帳單金額）；
    * prepaid 預繳沖銷由系統預收款銷帳（金額 0，只記帳單金額）。
    */
-  kind?: 'fee' | 'asis' | 'arrears' | 'prepaid';
+  kind?: 'fee' | 'asis' | 'arrears' | 'prepaid' | ChargeKind;
 }
+
+/** 帳單上不列入應繳的款項：罰款、裝潢保證金（金額 0，只記帳單金額），繳款時另外記在帳卡。 */
+export type ChargeKind = 'fine' | 'deposit';
 
 export interface ImportBatch {
   id: string;
@@ -201,6 +208,90 @@ export interface LedgerEntry {
   note: string;
   /** 由零用金頁產生的撥補支出所屬月份。 */
   pettyMonth?: string;
+  /** 裝潢保證金產生的分錄：deposit 手動登錄收到的保證金、refund 結算退款、fee 退款的匯款手續費。 */
+  renovationKind?: 'deposit' | 'refund' | 'fee';
+  /** 裝潢保證金分錄所屬的戶別（報表不顯示，只用來在裝潢保證金頁對應）。 */
+  renovationUnit?: string;
+  /** 結算產生的分錄所屬的裝潢紀錄。 */
+  renovationId?: string;
+}
+
+/** 裝潢保證金費率的一項：單筆直接扣，每日依施工天數計算。 */
+export interface RenovationRateItem {
+  id: string;
+  name: string;
+  mode: 'once' | 'daily';
+  amount: number;
+}
+
+/** 裝潢保證金費率方案；沒有項目就是「無費率」。 */
+export interface RenovationPlan {
+  id: string;
+  name: string;
+  items: RenovationRateItem[];
+}
+
+export interface RenovationSettings {
+  plans: RenovationPlan[];
+  /** 報表上收到保證金的科目名稱。 */
+  depositLabel: string;
+  /** 報表上結算退款的科目名稱。 */
+  refundLabel: string;
+  /** 報表上退款匯款手續費的科目名稱（分開呈現時使用）。 */
+  feeLabel: string;
+  /** 結算時預設的手續費呈現方式：separate 退款與手續費各列一筆、combined 手續費併入退款整筆呈現。 */
+  feeMode: RenovationFeeMode;
+}
+
+export type RenovationFeeMode = 'separate' | 'combined';
+
+/** 建立系統前就已收到、已含在帳戶期初餘額裡的裝潢保證金：只記在這戶，不影響帳戶餘額與報表。 */
+export interface RenovationOpening {
+  id: string;
+  unitNo: string;
+  date: string;
+  amount: number;
+  accountId: string;
+}
+
+/** 結算時每一項費率的扣款。 */
+export interface RenovationDeduction {
+  name: string;
+  mode: 'once' | 'daily';
+  amount: number;
+  days?: number;
+  deducted: number;
+}
+
+export interface RenovationSettlement {
+  at: string;
+  /** 退款列入哪個月份的報表（分錄日期）。 */
+  date: string;
+  /** 結算時已收的保證金與包含的收款（繳費 id 或分錄 id）。 */
+  deposit: number;
+  receiptIds: string[];
+  deductions: RenovationDeduction[];
+  deducted: number;
+  /** 應退金額＝退款＋匯款手續費。 */
+  refundTotal: number;
+  refund: number;
+  fee: number;
+  /** 手續費在報表上的呈現方式；舊資料沒有時視為分開。 */
+  feeMode?: RenovationFeeMode;
+  accountId: string;
+  entryIds: string[];
+}
+
+/** 一戶的一次裝修：套用當時的費率方案內容（之後修改方案不影響），結算後就完成。 */
+export interface Renovation {
+  id: string;
+  unitNo: string;
+  planName: string;
+  items: RenovationRateItem[];
+  startDate: string;
+  note: string;
+  createdAt: string;
+  settlement?: RenovationSettlement;
 }
 
 export interface MonthClose {
@@ -229,4 +320,9 @@ export interface AppData {
   entries: LedgerEntry[];
   closes: MonthClose[];
   audit: AuditEntry[];
+  renovations: Renovation[];
+  /** 建立系統前已收的裝潢保證金。 */
+  renovationOpenings?: RenovationOpening[];
+  /** 逾期款項歸類的報表科目：逾期款項的鍵（繳款 id｜月份｜項目）→ 科目，例如「10月逾期汽車清潔費」。 */
+  arrearsLabels?: Record<string, string>;
 }

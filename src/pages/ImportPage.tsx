@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Money, Section } from '../components/ui';
+import { FileDrop, Money, Section } from '../components/ui';
 import { FIELD_LABELS, newId, REQUIRED_FIELDS } from '../lib/defaults';
 import { monthOf, parsePeriods } from '../lib/dates';
 import BillImport from '../components/BillImport';
@@ -191,9 +191,9 @@ export default function ImportPage({ go }: { go: Go }) {
     <>
       <div className="page-head">
         <h1>匯入智生活報表</h1>
-        <div className="actions">
-          <button className={tab === 'deposit' ? 'primary' : ''} onClick={() => setTab('deposit')}>入帳報表</button>
-          <button className={tab === 'dues' ? 'primary' : ''} onClick={() => setTab('dues')}>每月應繳報表</button>
+        <div className="seg" role="tablist">
+          <button role="tab" aria-selected={tab === 'deposit'} className={tab === 'deposit' ? 'primary' : ''} onClick={() => setTab('deposit')}>入帳報表</button>
+          <button role="tab" aria-selected={tab === 'dues'} className={tab === 'dues' ? 'primary' : ''} onClick={() => setTab('dues')}>每月應繳報表</button>
         </div>
       </div>
       {tab === 'dues' ? (
@@ -207,10 +207,7 @@ export default function ImportPage({ go }: { go: Go }) {
               請從智生活管理後台「管理費 → 入帳報表」下載繳費明細（Excel 或 CSV）。同一份檔案重複匯入不會重複計算；
               入帳日使用報表上方的「預計入帳日」（或明細的入帳日欄位）；沒有入帳日的款項視為尚未入帳（列入在途存款），之後重新匯入有入帳日的報表會自動更新。每月應繳（管理費匯入範本）請切換到「每月應繳報表」分頁匯入。
             </p>
-            <label className="drop">
-              <input type="file" accept=".xlsx,.xls,.csv,.txt" onChange={(e) => onFile(e.target.files?.[0])} />
-              <span>點這裡選擇檔案，或把檔案拖曳到這裡</span>
-            </label>
+            <FileDrop title="選擇智生活管理費入帳報表" hint="點這裡選擇檔案，或把檔案拖曳到這裡（.xlsx、.xls、.csv）" accept=".xlsx,.xls,.csv,.txt" onFile={onFile} />
             {error && <p className="err">{error}</p>}
             {done && (
               <p className="ok">
@@ -309,11 +306,13 @@ export default function ImportPage({ go }: { go: Go }) {
                 已匯入過的款項（同一張收據單號）不會再新增。同一戶分好幾筆繳的，會全部新增並依序銷帳，超過應繳的部分列入這戶的預收款。
               </p>
               <div className="form-row">
+                <div className="seg">
                 {(['all', 'new', 'dup', 'maybe'] as const).map((f) => (
                   <button key={f} className={rowFilter === f ? 'primary' : ''} onClick={() => setRowFilter(f)}>
                     {f === 'all' ? `全部（${preview.openRows.length}）` : f === 'new' ? `新的款項（${preview.dry.added + skip.size}）` : f === 'dup' ? `已匯入過（${preview.dry.duplicates}）` : `可能重複（${preview.maybeDup.size}）`}
                   </button>
                 ))}
+                </div>
                 <input placeholder="搜尋戶別或所有權人" value={rowQ} onChange={(e) => setRowQ(e.target.value)} />
                 <button onClick={() => setSkip(new Set())}>全部新增</button>
                 <button onClick={() => setSkip(new Set(preview.openRows.filter((r) => isNew(preview.dry.status.get(r.rowNumber))).map((r) => r.rowNumber)))}>全部不新增</button>

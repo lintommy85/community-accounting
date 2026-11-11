@@ -2,16 +2,12 @@ import { useState } from 'react';
 import { Money, MonthInput, Section, thisMonth } from '../components/ui';
 import { newId, resolveDepositAccountId, transferAccounts } from '../lib/defaults';
 import { todayStr } from '../lib/dates';
+import { nextVoucher } from '../lib/ledger';
 import { LedgerEntry } from '../lib/types';
 import { useStore } from '../store';
 
 const TYPE_LABEL = { income: '收入', expense: '支出', transfer: '轉帳' } as const;
 
-function nextVoucher(entries: LedgerEntry[], date: string): string {
-  const prefix = `${Number(date.slice(0, 4)) - 1911}-`;
-  const max = entries.filter((e) => e.voucherNo.startsWith(prefix)).reduce((m, e) => Math.max(m, Number(e.voucherNo.slice(prefix.length)) || 0), 0);
-  return `${prefix}${String(max + 1).padStart(4, '0')}`;
-}
 
 export default function LedgerPage() {
   const { data, update, isClosed } = useStore();

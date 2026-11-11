@@ -1,8 +1,8 @@
 import { addMonths, monthEnd, monthOf, monthRange, parsePeriods } from './dates';
 import { unitBaseline } from './fees';
 import { ownerAt } from './owners';
-import { normUnit, PREPAID_BEFORE_ITEM, PRIOR_ITEM } from './dues';
-import { AppData, Payment, Unit } from './types';
+import { BILL_DEPOSIT, BILL_FINE, billItemName, normUnit, PREPAID_BEFORE_ITEM, PRIOR_ITEM } from './dues';
+import { AppData, ChargeKind, LedgerEntry, Payment, Settings, Unit } from './types';
 
 export { normUnit } from './dues';
 
@@ -59,6 +59,87 @@ export interface UnitAccount {
   pendingCredit: Set<string>;
   /** 期別都在帳務起始月之前、那些月份也沒有應繳的款項：繳的是起始月前的帳單，不銷帳，也不列預收或暫收。 */
   beforeStart: Set<string>;
+  /** 帳單上的罰款、裝潢保證金（不列入應繳，只記在帳卡）。 */
+  charges: ChargeLine[];
+  /** 繳款中付罰款、裝潢保證金的部分。 */
+  chargePaid: ChargePayment[];
+}
+
+export interface ChargeLine {
+  month: string;
+  kind: ChargeKind;
+  item: string;
+  amount: number;
+}
+
+export interface ChargePayment {
+  paymentId: string;
+  month: string;
+  kind: ChargeKind;
+  amount: number;
+}
+
+export interface ChargeAmounts {
+  fine: number;
+  deposit: number;
+}
+
+/** 繳款中付罰款、裝潢保證金的說明文字，例如「罰款 500、裝潢保證金 10,000」；sep 為前面已有其他文字時加頓號。 */
+export function chargeText(c: ChargeAmounts, sep = false): string {
+  const parts = [c.fine ? `罰款 ${c.fine.toLocaleString('zh-TW')}` : '', c.deposit ? `裝潢保證金 ${c.deposit.toLocaleString('zh-TW')}` : ''].filter(Boolean).join('、');
+  return parts ? `${sep ? '、' : ''}${parts}` : '';
+}
+
+/** 某筆繳款中付罰款、裝潢保證金的金額。 */
+export function chargeAmounts(acc: UnitAccount, paymentId: string): ChargeAmounts {
+  const out = { fine: 0, deposit: 0 };
+  for (const c of acc.chargePaid) if (c.paymentId === paymentId) out[c.kind] += c.amount;
+  return out;
+}
+
+export interface ChargeRow {
+  month: string;
+  kind: ChargeKind;
+  item: string;
+  /** 帳單金額；沒有帳單（例如手動登錄或入帳報表項目就是保證金）時為 null。 */
+  billed: number | null;
+  paid: number;
+  dates: string[];
+}
+
+/** 帳卡上的罰款與裝潢保證金：每張帳單的金額、已繳與繳款日，加上沒有帳單的繳款與手動登錄的保證金。 */
+export function unitChargeRows(acc: UnitAccount, entries: LedgerEntry[]): ChargeRow[] {
+  const payDate = new Map(acc.feePayments.map((p) => [p.id, p.paidDate]));
+  const rows: ChargeRow[] = [];
+  const used = new Set<ChargePayment>();
+  for (const c of acc.charges) {
+    const paidLines = acc.chargePaid.filter((p) => p.month === c.month && p.kind === c.kind && !used.has(p));
+    let need = c.amount;
+    const mine: ChargePayment[] = [];
+    for (const p of paidLines) {
+      if (need <= 0) break;
+      mine.push(p);
+      used.add(p);
+      need -= p.amount;
+    }
+    rows.push({ month: c.month, kind: c.kind, item: c.item, billed: c.amount, paid: mine.reduce((t, p) => t + p.amount, 0), dates: [...new Set(mine.map((p) => payDate.get(p.paymentId) ?? ''))].filter(Boolean) });
+  }
+  for (const p of acc.chargePaid) {
+    if (used.has(p)) continue;
+    rows.push({ month: p.month, kind: p.kind, item: p.kind === 'fine' ? '罰款' : '裝潢保證金', billed: null, paid: p.amount, dates: [payDate.get(p.paymentId) ?? ''].filter(Boolean) });
+  }
+  const key = normUnit(acc.unit.unitNo);
+  for (const e of entries) {
+    if (e.renovationKind !== 'deposit' || !e.renovationUnit || normUnit(e.renovationUnit) !== key) continue;
+    rows.push({ month: e.date.slice(0, 7), kind: 'deposit', item: '裝潢保證金（手動登錄）', billed: null, paid: e.amount, dates: [e.date] });
+  }
+  return rows.sort((a, b) => a.month.localeCompare(b.month));
+}
+
+/** 繳費項目本身對應到罰款或裝潢保證金時（例如入帳報表的項目就是「裝潢保證金」），整筆都是這個款項。 */
+export function chargeKindOfItem(item: string, settings: Pick<Settings, 'billItemMap'>): ChargeKind | undefined {
+  const t = settings.billItemMap?.[billItemName(item || '')];
+  return t === BILL_FINE ? 'fine' : t === BILL_DEPOSIT ? 'deposit' : undefined;
 }
 
 export interface AllocationResult {
@@ -69,6 +150,8 @@ export interface AllocationResult {
   byKey: Map<string, UnitAccount>;
   unmatched: Payment[];
   byPayment: Map<string, Allocation[]>;
+  /** 每筆繳款中付罰款、裝潢保證金的金額。 */
+  chargesByPayment: Map<string, ChargeAmounts>;
 }
 
 /** 起始月：設定值優先，否則取最早的應繳或繳費月份。 */
@@ -111,11 +194,18 @@ export function allocateAll(data: AppData): AllocationResult {
     const key = normUnit(unit.unitNo);
     if (!key || byKey.has(key)) continue;
     const opening = openingPayment(unit, startMonth);
-    byKey.set(key, { unit, key, dueByMonth: new Map(), billByMonth: new Map(), cycleByBill: new Map(), feePayments: opening ? [opening] : [], allocations: [], paidByMonth: new Map(), creditByPayment: new Map(), credit: 0, offsets: new Map(), offsetUsed: new Map(), prepaidBefore: new Map(), prepaidBeforeUsed: new Map(), free: [], pendingCredit: new Set(), beforeStart: new Set() });
+    byKey.set(key, { unit, key, dueByMonth: new Map(), billByMonth: new Map(), cycleByBill: new Map(), feePayments: opening ? [opening] : [], allocations: [], paidByMonth: new Map(), creditByPayment: new Map(), credit: 0, offsets: new Map(), offsetUsed: new Map(), prepaidBefore: new Map(), prepaidBeforeUsed: new Map(), free: [], pendingCredit: new Set(), beforeStart: new Set(), charges: [], chargePaid: [] });
   }
   for (const d of data.dues) {
     const acc = byKey.get(normUnit(d.unitNo));
-    if (!acc || d.month < startMonth) continue;
+    if (!acc) continue;
+    if (d.kind === 'fine' || d.kind === 'deposit') {
+      // 罰款、保證金不受帳務起始月限制，也不列入應繳；帳單金額照樣算進這個月的帳單（比對繳款金額用）
+      acc.charges.push({ month: d.month, kind: d.kind, item: d.item, amount: d.billAmount ?? 0 });
+      acc.billByMonth.set(d.month, (acc.billByMonth.get(d.month) ?? 0) + (d.billAmount ?? 0));
+      continue;
+    }
+    if (d.month < startMonth) continue;
     acc.dueByMonth.set(d.month, (acc.dueByMonth.get(d.month) ?? 0) + d.amount);
     if (d.kind === 'prepaid') acc.offsets.set(d.month, (acc.offsets.get(d.month) ?? 0) - (d.billAmount ?? 0));
     if (d.item === PREPAID_BEFORE_ITEM && d.amount < 0) acc.prepaidBefore.set(d.month, (acc.prepaidBefore.get(d.month) ?? 0) - d.amount);
@@ -133,12 +223,20 @@ export function allocateAll(data: AppData): AllocationResult {
     else acc.feePayments.push(p);
   }
 
-  for (const acc of byKey.values()) allocateUnit(acc, trackFrom);
+  const chargeOf = (p: Payment) => chargeKindOfItem(p.item, settings);
+  for (const acc of byKey.values()) allocateUnit(acc, trackFrom, chargeOf);
 
   const accounts = Array.from(byKey.values()).sort((a, b) => a.unit.unitNo.localeCompare(b.unit.unitNo, 'zh-Hant', { numeric: true }));
   const byPayment = new Map<string, Allocation[]>();
   for (const acc of accounts) for (const a of acc.allocations) (byPayment.get(a.paymentId) ?? byPayment.set(a.paymentId, []).get(a.paymentId)!).push(a);
-  return { startMonth, trackFrom, accounts, byKey, unmatched, byPayment };
+  const chargesByPayment = new Map<string, ChargeAmounts>();
+  for (const acc of accounts) {
+    for (const c of acc.chargePaid) {
+      const v = chargesByPayment.get(c.paymentId) ?? chargesByPayment.set(c.paymentId, { fine: 0, deposit: 0 }).get(c.paymentId)!;
+      v[c.kind] += c.amount;
+    }
+  }
+  return { startMonth, trackFrom, accounts, byKey, unmatched, byPayment, chargesByPayment };
 }
 
 /** 期別都在起始月之前、而且那些月份沒有應繳（帳單拆出的前期欠款除外）：繳的是起始月前的帳單。 */
@@ -147,7 +245,7 @@ function paysBeforeStart(acc: UnitAccount, p: Payment, trackFrom: string): boole
   return periods.length > 0 && periods.every((m) => m < trackFrom && !acc.dueByMonth.has(m));
 }
 
-function allocateUnit(acc: UnitAccount, trackFrom: string) {
+function allocateUnit(acc: UnitAccount, trackFrom: string, chargeOf: (p: Payment) => ChargeKind | undefined = () => undefined) {
   const payments = acc.feePayments.sort((a, b) => a.paidDate.localeCompare(b.paidDate) || a.id.localeCompare(b.id));
   const add = (p: Payment, month: string, amount: number, source: AllocationSource) => {
     if (!amount) return;
@@ -157,8 +255,29 @@ function allocateUnit(acc: UnitAccount, trackFrom: string) {
   const gap = (m: string) => Math.max(0, dueFor(acc, m) - (acc.paidByMonth.get(m) ?? 0));
   const queue: { p: Payment; remaining: number }[] = [];
   const refunds: Payment[] = [];
+  // 罰款、裝潢保證金：繳款先銷期別內的應繳，再付這期帳單上的罰款、保證金；其餘款項銷完應繳後再付還沒繳的
+  const chargeOwed = (m: string, kind: ChargeKind) =>
+    acc.charges.filter((c) => c.month === m && c.kind === kind).reduce((t, c) => t + c.amount, 0) -
+    acc.chargePaid.filter((c) => c.month === m && c.kind === kind).reduce((t, c) => t + c.amount, 0);
+  const payCharges = (p: Payment, months: string[], remaining: number) => {
+    for (const m of [...new Set(months)].sort()) {
+      for (const kind of ['fine', 'deposit'] as const) {
+        const a = Math.min(remaining, Math.max(0, chargeOwed(m, kind)));
+        if (a > 0) {
+          acc.chargePaid.push({ paymentId: p.id, month: m, kind, amount: a });
+          remaining -= a;
+        }
+      }
+    }
+    return remaining;
+  };
 
   for (const p of payments) {
+    const whole = p.amount > 0 && !p.allocations && !isOpeningPayment(p.id) ? chargeOf(p) : undefined;
+    if (whole) {
+      acc.chargePaid.push({ paymentId: p.id, month: parsePeriods(p.billPeriod)[0] ?? monthOf(p.paidDate), kind: whole, amount: p.amount });
+      continue;
+    }
     if (p.allocations) {
       for (const a of p.allocations) add(p, a.month, a.amount, 'manual');
       const rest = p.amount - p.allocations.reduce((s, a) => s + a.amount, 0);
@@ -181,6 +300,7 @@ function allocateUnit(acc: UnitAccount, trackFrom: string) {
       add(p, m, a, 'period');
       remaining -= a;
     }
+    if (remaining > 0 && acc.charges.length) remaining = payCharges(p, periods, remaining);
     if (remaining > 0) queue.push({ p, remaining });
   }
 
@@ -219,6 +339,7 @@ function allocateUnit(acc: UnitAccount, trackFrom: string) {
       add(q.p, m, a, 'auto');
       q.remaining -= a;
     }
+    if (q.remaining > 0 && acc.charges.length && !isOpeningPayment(q.p.id)) q.remaining = payCharges(q.p, acc.charges.map((c) => c.month), q.remaining);
     if (q.remaining > 0) acc.creditByPayment.set(q.p.id, (acc.creditByPayment.get(q.p.id) ?? 0) + q.remaining);
   }
 
@@ -387,7 +508,10 @@ export function receiptBreakdownBy(
       continue;
     }
     if (acc.beforeStart.has(p.id)) {
-      out.arrears += p.amount;
+      // 起始月前的帳單：期別早於報表期間才算補繳以前月份，當月繳當月的帳單算當期
+      const periods = parsePeriods(p.billPeriod);
+      if (periods.length && periods.every((m) => m < startMonth)) out.arrears += p.amount;
+      else out.current += p.amount;
       continue;
     }
     for (const a of result.byPayment.get(p.id) ?? []) {
@@ -503,7 +627,7 @@ export function findAmountMismatches(data: AppData, paymentIds: Set<string>): Am
   const groupKey = (p: Payment) => `${normUnit(p.unitNo)}|${monthsOf(p).join(',')}`;
   const groups = new Map<string, Payment[]>();
   for (const p of data.payments) {
-    if (!paymentIds.has(p.id) || p.voided || p.allocations || p.amount <= 0) continue;
+    if (!paymentIds.has(p.id) || p.voided || p.allocations || p.amount <= 0 || chargeKindOfItem(p.item, data.settings)) continue;
     (groups.get(groupKey(p)) ?? groups.set(groupKey(p), []).get(groupKey(p))!).push(p);
   }
   const out: AmountCheck[] = [];
@@ -517,7 +641,7 @@ export function findAmountMismatches(data: AppData, paymentIds: Set<string>): Am
     const billed = months.some((m) => account.billByMonth.has(m));
     const bill = billed ? months.reduce((s, m) => s + (account.billByMonth.get(m) ?? 0), 0) : unitBaseline(account.unit, data.settings.feePlans) * months.length;
     if (!billed && !bill) continue;
-    const already = months.reduce((s, m) => s + (account.paidByMonth.get(m) ?? 0), 0);
+    const already = months.reduce((s, m) => s + (account.paidByMonth.get(m) ?? 0), 0) + account.chargePaid.filter((c) => months.includes(c.month)).reduce((s, c) => s + c.amount, 0);
     const existing = data.payments.filter((x) => !paymentIds.has(x.id) && !x.voided && groupKey(x) === key).length;
     const remaining = Math.max(0, bill - already);
     list.sort((a, b) => a.paidDate.localeCompare(b.paidDate) || a.id.localeCompare(b.id));
@@ -595,6 +719,8 @@ export interface PaidLine {
   pending: boolean;
   /** 繳的是帳務起始月前的帳單，不銷帳。 */
   beforeStart: boolean;
+  /** 這筆繳款中付罰款、裝潢保證金的金額。 */
+  charges: ChargeAmounts;
 }
 
 /** 某月份的繳費紀錄（已繳清單）：每筆繳費與它銷到哪些月份。 */
@@ -603,7 +729,7 @@ export function paidListForMonth(result: AllocationResult, payments: Payment[], 
     .filter((p) => !p.voided && p.paidDate.startsWith(month))
     .map((p) => {
       const acc = result.byKey.get(normUnit(p.unitNo));
-      return { payment: p, owner: (acc && ownerAt(acc.unit, month)) || p.payerName, allocations: result.byPayment.get(p.id) ?? [], credit: acc?.creditByPayment.get(p.id) ?? 0, pending: !acc || acc.pendingCredit.has(p.id), beforeStart: !!acc?.beforeStart.has(p.id) };
+      return { payment: p, owner: (acc && ownerAt(acc.unit, month)) || p.payerName, allocations: result.byPayment.get(p.id) ?? [], credit: acc?.creditByPayment.get(p.id) ?? 0, pending: !acc || acc.pendingCredit.has(p.id), beforeStart: !!acc?.beforeStart.has(p.id), charges: result.chargesByPayment.get(p.id) ?? { fine: 0, deposit: 0 } };
     })
     .sort((a, b) => a.payment.unitNo.localeCompare(b.payment.unitNo, 'zh-Hant', { numeric: true }) || a.payment.paidDate.localeCompare(b.payment.paidDate));
 }

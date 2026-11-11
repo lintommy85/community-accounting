@@ -56,6 +56,9 @@ export function normalizeData(raw: unknown): AppData {
     entries: src.entries ?? [],
     closes: src.closes ?? [],
     audit: src.audit ?? [],
+    renovations: src.renovations ?? [],
+    renovationOpenings: src.renovationOpenings ?? [],
+    arrearsLabels: src.arrearsLabels ?? {},
   };
 }
 

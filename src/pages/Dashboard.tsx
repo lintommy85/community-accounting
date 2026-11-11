@@ -3,6 +3,7 @@ import type { Go } from '../components/nav';
 import CommunityProfile from '../components/CommunityProfile';
 import { lastMonth, Section, Stat, thisMonth } from '../components/ui';
 import { advancesFromAllocations, allocateAll } from '../lib/allocation';
+import { openDepositSummary } from '../lib/renovation';
 import { todayStr } from '../lib/dates';
 import { resolveDepositAccountId } from '../lib/defaults';
 import { activeUnits, unitBaseline } from '../lib/fees';
@@ -22,7 +23,10 @@ export default function Dashboard({ go }: { go: Go }) {
   // 撥款對帳還沒核對相符的繳費列為待確認款項，不算進預收款／暫收款
   const pending = data.payments.filter((p) => !p.voided && !p.depositConfirmed && p.paidDate <= today);
   const pendingTotal = pending.reduce((sum, p) => sum + p.amount, 0);
-  const adv = data.settings.units.some((u) => !u.deletedAt) ? advancesFromAllocations(allocateAll(data), data.payments, month, { confirmedOnly: true }) : { prepaid: r.prepaid, suspense: r.suspense };
+  const alloc = data.settings.units.some((u) => !u.deletedAt) ? allocateAll(data) : null;
+  const adv = alloc ? advancesFromAllocations(alloc, data.payments, month, { confirmedOnly: true }) : { prepaid: r.prepaid, suspense: r.suspense };
+  // 有收到、還沒結算的裝潢保證金才顯示這格
+  const renovation = alloc ? openDepositSummary(data, alloc, month) : { total: 0, units: 0 };
   const units = activeUnits(data.settings.units);
   const overdue = depositGroups(data.payments).filter((g) => g.depositDate <= today && !g.confirmed);
   const lastBackup = [...data.audit].reverse().find((a) => a.action === '下載備份');
@@ -63,6 +67,7 @@ export default function Dashboard({ go }: { go: Go }) {
         <Stat label="待確認款項" icon="hourglass" color="red" value={pendingTotal} hint={`${pending.length} 筆，撥款對帳尚未核對相符`} tone={pendingTotal ? 'warn' : undefined} onClick={() => go('deposits')} title="前往撥款對帳" />
         <Stat label={`${month} 預收款`} icon="coins" color="purple" value={adv.prepaid} hint="已核對的預繳、多繳款項（含期初預收款），每月沖銷後減少" />
         <Stat label={`${month} 暫收款`} icon="clock" color="gray" value={adv.suspense} hint="已核對，期別的每月應繳還沒匯入" tone={adv.suspense ? 'warn' : undefined} />
+        {renovation.total > 0 && <Stat label="裝潢保證金" icon="hammer" color="purple" value={renovation.total} hint={`${renovation.units} 戶施工中、尚未結算`} onClick={() => go('renovation')} title="前往裝潢保證金" />}
       </div>
       <Section title="待辦事項">
         {todos.length === 0 ? (

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { advancesFromAllocations, allocateAll, findAmountMismatches, prepaidLedger } from './allocation';
-import { applyBaselineUpdates, applyCycleUpdates, itemMonthSpan, SpanDecision, ARREARS_ITEM, BILL_ARREARS, BILL_ASIS, BILL_PREPAID, billItemName, DiffDecision, planBillImport, suggestBillItem } from './bills';
+import { applyBaselineUpdates, applyCycleUpdates, earlierStartMonth, isArrearsName, resolveBillItem, itemMonthSpan, SpanDecision, ARREARS_ITEM, BILL_ARREARS, BILL_ASIS, BILL_PREPAID, billItemName, DiffDecision, planBillImport, suggestBillItem } from './bills';
 import { emptyData } from './defaults';
 import { applyDueChanges, diffDues, DueRow } from './dues';
 import { setUnitItemBaseline, unitBaselines } from './fees';
@@ -317,5 +317,30 @@ describe('updating a household baseline from the bill', () => {
     expect(setUnitItemBaseline(u, '汽車位清潔費', 1000, plans).extras).toEqual([{ planId: 'car', qty: 2 }]);
     expect(setUnitItemBaseline(u, '汽車位清潔費', 650, plans).extras).toEqual([{ item: '汽車位清潔費', amount: 650, qty: 1 }]);
     expect(setUnitItemBaseline(u, '汽車位清潔費', 0, plans).extras).toEqual([]);
+  });
+});
+
+describe('逾期類的帳單項目', () => {
+  it('maps overdue items straight to 逾期 without asking, and never compares them with the baseline', () => {
+    const d = setup();
+    expect(['逾期汽車清潔費', '逾期', '未繳管理費', '前期未繳'].map(isArrearsName)).toEqual([true, true, true, true]);
+    expect(isArrearsName('汽車位清潔費')).toBe(false);
+    expect(resolveBillItem('逾期汽車清潔費', d.settings)).toBe(BILL_ARREARS);
+    expect(suggestBillItem('逾期汽車清潔費', ['汽車位清潔費'])).toBe(BILL_ARREARS);
+    // B 戶 10 月已繳、A 戶 10 月欠 2000：A 的帳單帶「10月逾期」2000，B 的帳單帶「逾期汽車清潔費」500
+    const { plan } = importBills(d, [bill('A', 2000), bill('A', 2000, '10月逾期'), bill('B', 2000), bill('B', 500, '11月汽車位清潔費'), bill('B', 500, '逾期汽車清潔費')]);
+    expect(plan.unmapped).toEqual([]);
+    expect(plan.diffs).toEqual([]);
+    expect(plan.splits.map((s) => [s.unitNo, s.base, s.carried, s.prior])).toEqual([['A', 2000, 2000, 0], ['B', 2500, 500, 500]]);
+  });
+
+  it('does not move the billing start month earlier because of 前期欠款 split from a bill', () => {
+    const dues: Due[] = [
+      { id: '1', unitNo: 'A', month: '2026-10', item: '前期欠款', amount: 2000, source: 'import', note: '', updatedAt: '', fromBill: '2026-11' },
+      { id: '2', unitNo: 'A', month: '2026-11', item: '管理費', amount: 2000, source: 'import', note: '', updatedAt: '', kind: 'fee' },
+    ];
+    expect(earlierStartMonth('2026-11', ['2026-12'], dues)).toBe('');
+    expect(earlierStartMonth('2026-11', ['2026-10'], dues)).toBe('2026-10');
+    expect(earlierStartMonth('', ['2026-10'], dues)).toBe('');
   });
 });

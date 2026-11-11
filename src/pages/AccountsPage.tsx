@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { PageKey } from '../App';
 import { isEnterKey, Money, MonthInput, Section, thisMonth } from '../components/ui';
+import { Icon } from '../components/icons';
 import { fileBase, newId, transferAccounts } from '../lib/defaults';
 import { todayStr } from '../lib/dates';
 import { accountRegisters, RegisterKind } from '../lib/ledger';
@@ -80,8 +81,8 @@ export default function AccountsPage({ go }: { go: (p: PageKey) => void }) {
         <h1>帳戶與轉帳</h1>
         <div className="actions">
           <MonthInput value={month} onChange={setMonth} />
-          <button onClick={() => downloadBlob(exportAccountRegisters(data, month, regs), `${fileBase(settings)}-${month}-帳戶變動.xlsx`)}>匯出 Excel</button>
-          <button onClick={() => window.print()}>列印</button>
+          <button onClick={() => downloadBlob(exportAccountRegisters(data, month, regs), `${fileBase(settings)}-${month}-帳戶變動.xlsx`)}><Icon name="download" />匯出 Excel</button>
+          <button onClick={() => window.print()}><Icon name="printer" />列印</button>
         </div>
       </div>
 
