@@ -28,8 +28,12 @@ export default function MonthDues({ go }: { go: Go }) {
     const items = dueMap.get(normUnit(u.unitNo)) ?? [];
     const current = items.filter((d) => d.month === month);
     // 匯入時照帳單減少應繳的沖銷，之後有預收款就改由預收款沖銷，應繳恢復原額
-    const switched = alloc.byKey.get(normUnit(u.unitNo))?.prepaidBeforeUsed.get(month) ?? 0;
+    const acc = alloc.byKey.get(normUnit(u.unitNo));
+    const switched = acc?.prepaidBeforeUsed.get(month) ?? 0;
     const due = current.reduce((sum, d) => sum + d.amount, 0) + switched;
+    // 帳單上的預繳沖銷（含期初預收款）由預收款銷帳：算在本月應繳裡，但智生活帳單已經扣掉
+    const prepaidOffset = Math.min(Math.max(0, due), acc?.offsetUsed.get(month) ?? 0);
+    const billOffset = Math.max(0, (acc?.prepaidBefore.get(month) ?? 0) - switched);
     // 罰款、裝潢保證金不列入應繳，也不算帳單內含的逾期
     const billRows = current.filter((d) => !d.fromBill && d.kind !== 'fine' && d.kind !== 'deposit');
     const bill = billRows.reduce((sum, d) => sum + (d.billAmount ?? d.amount), 0);
@@ -41,13 +45,19 @@ export default function MonthDues({ go }: { go: Go }) {
     // 帳單上的預繳沖銷由預收款銷帳，比較帳單和基準時要加回來（例如年繳戶帳單是 0）
     const offset = billRows.filter((d) => d.kind === 'prepaid').reduce((sum, d) => sum - (d.billAmount ?? 0), 0);
     const issue = !base && !current.length ? '未設定基準' : !current.length ? '尚未匯入' : billRows.length && bill + offset < covered ? '帳單低於基準' : '';
-    return { u, current, due, switched, bill, covered, hasBill: billRows.length > 0, carried: Math.max(0, bill - covered), prior, inCycle, base, issue };
+    return { u, current, due, prepaidOffset, billOffset, switched, bill, covered, hasBill: billRows.length > 0, carried: Math.max(0, bill - covered), prior, inCycle, base, issue };
   });
   const shown = rows
     .filter((r) => !kw || r.u.unitNo.toUpperCase().includes(kw) || ownerMatches(r.u, kw))
     .filter((r) => !onlyIssue || r.issue);
   const billed = rows.filter((r) => r.current.length).length;
   const sum = (f: (r: (typeof rows)[number]) => number) => rows.reduce((t, r) => t + f(r), 0);
+  const billing = (r: (typeof rows)[number]) => r.due - r.prepaidOffset > 0;
+  const count = (f: (r: (typeof rows)[number]) => boolean, before: (r: (typeof rows)[number]) => boolean) => {
+    const all = rows.filter(f);
+    const shared = all.filter(before).length;
+    return `${all.length - shared} 戶${shared ? `，另 ${shared} 戶部分沖銷，戶數算在前面` : ''}`;
+  };
 
   return (
     <Section title="每月應繳（只能查看）" actions={<MonthInput value={month} onChange={setMonth} />}>
@@ -61,6 +71,14 @@ export default function MonthDues({ go }: { go: Go }) {
           {month}：已匯入 {billed}／{units.length} 戶，帳單合計 <Money value={sum((r) => r.bill)} strong /> 元，
           其中本月應繳 <Money value={sum((r) => r.due)} strong /> 元、帳單內含逾期 <Money value={sum((r) => r.carried)} /> 元
           {sum((r) => r.prior) ? <>（前期欠款 <Money value={sum((r) => r.prior)} /> 元）</> : ''}
+          {sum((r) => r.prepaidOffset + r.billOffset) > 0 && (
+            <>
+              <br />
+              本月應繳中：智生活帳單本月應繳 <Money value={sum((r) => r.due - r.prepaidOffset)} strong /> 元（{rows.filter(billing).length} 戶）
+              {sum((r) => r.prepaidOffset) > 0 && <>、帳單預繳沖銷由預收款銷帳 <Money value={sum((r) => r.prepaidOffset)} /> 元（{count((r) => r.prepaidOffset > 0, billing)}）</>}
+              {sum((r) => r.billOffset) > 0 && <>；另有帳單預繳沖銷沒有期初預收款、照帳單扣除 <Money value={sum((r) => r.billOffset)} /> 元（{count((r) => r.billOffset > 0, (r) => billing(r) || r.prepaidOffset > 0)}），不算在本月應繳</>}
+            </>
+          )}
         </span>
         <button onClick={() => go('import', 'dues')}>匯入每月應繳報表 →</button>
       </div>

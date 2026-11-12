@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { allocateAll, findAmountMismatches, monthWriteOff, monthWriteOffByUnit, advancesFromAllocations, receiptBreakdown, summarizeUnit, unitNosFromPayments } from './allocation';
 import { emptyData } from './defaults';
+import { PREPAID_BEFORE_ITEM } from './dues';
 import { Due, Payment } from './types';
 
 let seq = 0;
@@ -207,6 +208,36 @@ describe('opening prepaid and unreconciled payments', () => {
     expect(advancesFromAllocations(r, d.payments, '2026-10', { confirmedOnly: true }).prepaid).toBe(0);
     d.payments[0].depositConfirmed = true;
     expect(advancesFromAllocations(allocateAll(d), d.payments, '2026-10', { confirmedOnly: true }).prepaid).toBe(4000);
+  });
+});
+
+describe('應收拆出帳單本月應繳與預繳沖銷', () => {
+  it('splits the receivable when an opening prepaid covers a 啟用前預繳 offset on the bill', () => {
+    const d = setup([], [{ ...due('A1-3F', '2026-11', -2000, PREPAID_BEFORE_ITEM), kind: 'asis' }], ['2026-11']);
+    d.settings.billingStartMonth = '2026-11';
+    d.settings.units[0].openingPrepaid = 2000;
+    const w = monthWriteOff(allocateAll(d), d.payments, '2026-11');
+    expect([w.due, w.units, w.billDue, w.billUnits, w.offset, w.offsetUnits, w.fromPrepaid, w.owing]).toEqual([6500, 3, 4500, 2, 2000, 1, 2000, 4500]);
+  });
+
+  it('splits the receivable for a prepaid offset imported with the bill, and leaves it whole without one', () => {
+    const d = setup([], [{ ...due('B2-2F', '2026-11', 0, '預繳沖銷'), kind: 'prepaid', billAmount: -1000 }], ['2026-11']);
+    d.settings.billingStartMonth = '2026-11';
+    d.settings.units[2].openingPrepaid = 1000;
+    const w = monthWriteOff(allocateAll(d), d.payments, '2026-11');
+    expect([w.due, w.units, w.billDue, w.billUnits, w.offset, w.offsetUnits, w.offsetShared]).toEqual([6500, 3, 5500, 3, 1000, 0, 1]);
+    const plain = monthWriteOff(allocateAll(setup([], [], ['2026-11'])), [], '2026-11');
+    expect([plain.due, plain.billDue, plain.offset, plain.offsetUnits]).toEqual([6500, 6500, 0, 0]);
+  });
+
+  it('counts a unit whose bill is offset without an opening prepaid, in both the receivable and the write-off', () => {
+    const d = setup([], [{ ...due('A1-3F', '2026-11', -2000, PREPAID_BEFORE_ITEM), kind: 'asis' }, { ...due('B2-2F', '2026-11', -10, PREPAID_BEFORE_ITEM), kind: 'asis' }], ['2026-11']);
+    d.settings.billingStartMonth = '2026-11';
+    const r = allocateAll(d);
+    const w = monthWriteOff(r, d.payments, '2026-11');
+    expect([w.units, w.due, w.billDue, w.billUnits, w.offset, w.billOffset, w.billOffsetUnits, w.billOffsetShared, w.writtenOff, w.owing]).toEqual([3, 6500, 4490, 2, 0, 2010, 1, 1, 2010, 4490]);
+    expect(w.billUnits + w.offsetUnits + w.billOffsetUnits).toBe(w.units);
+    expect(monthWriteOffByUnit(r, d.payments, '2026-11').map((x) => [x.unitNo, x.due, x.billOffset, x.owing])).toEqual([['A1-3F', 0, 2000, 0], ['A1-5F', 2000, 0, 2000], ['B2-2F', 2490, 10, 2490]]);
   });
 });
 

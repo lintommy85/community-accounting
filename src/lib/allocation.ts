@@ -530,6 +530,19 @@ export interface MonthWriteOff {
   month: string;
   units: number;
   due: number;
+  /** 應收中智生活帳單本身要繳的部分（應收扣掉帳單上的預繳沖銷）與戶數；每戶只算在一行，帳單還有要繳的就算在這裡。 */
+  billDue: number;
+  billUnits: number;
+  /** 帳單上的預繳沖銷（含期初預收款），由預收款銷帳；帳單已扣掉，但仍算在應收裡。 */
+  offset: number;
+  offsetUnits: number;
+  /** 有預繳沖銷、但帳單還有要繳而算在帳單本月應繳的戶數。 */
+  offsetShared: number;
+  /** 帳單上的預繳沖銷沒有預收款可以扣、照帳單減少應繳的金額與戶數：算在應收，也算在已銷帳。 */
+  billOffset: number;
+  billOffsetUnits: number;
+  /** 照帳單扣除沖銷、但戶數已算在前面兩行的戶數。 */
+  billOffsetShared: number;
   writtenOff: number;
   fromPrepaid: number;
   fromCurrent: number;
@@ -542,6 +555,10 @@ export interface UnitWriteOff {
   unitNo: string;
   owner: string;
   due: number;
+  /** 帳單上的預繳沖銷由預收款銷帳的金額。 */
+  offset: number;
+  /** 帳單上的預繳沖銷沒有預收款可以扣、照帳單減少應繳的金額（不含在 due 裡）。 */
+  billOffset: number;
   writtenOff: number;
   fromPrepaid: number;
   fromCurrent: number;
@@ -556,7 +573,7 @@ export function monthWriteOffByUnit(result: AllocationResult, payments: Payment[
   const paidDate = new Map(payments.map((p) => [p.id, p.paidDate]));
   const rows: UnitWriteOff[] = [];
   for (const acc of result.accounts) {
-    const row: UnitWriteOff = { unitNo: acc.unit.unitNo, owner: ownerAt(acc.unit, month), due: dueFor(acc, month), writtenOff: 0, fromPrepaid: 0, fromCurrent: 0, fromLater: 0, owing: 0 };
+    const row: UnitWriteOff = { unitNo: acc.unit.unitNo, owner: ownerAt(acc.unit, month), due: dueFor(acc, month), offset: Math.min(dueFor(acc, month), acc.offsetUsed.get(month) ?? 0), billOffset: Math.max(0, (acc.prepaidBefore.get(month) ?? 0) - (acc.prepaidBeforeUsed.get(month) ?? 0)), writtenOff: 0, fromPrepaid: 0, fromCurrent: 0, fromLater: 0, owing: 0 };
     for (const a of acc.allocations) {
       if (a.month !== month) continue;
       row.writtenOff += a.amount;
@@ -566,18 +583,31 @@ export function monthWriteOffByUnit(result: AllocationResult, payments: Payment[
       else row.fromCurrent += a.amount;
     }
     row.owing = Math.max(0, row.due - row.writtenOff);
-    if (row.due || row.writtenOff) rows.push(row);
+    if (row.due || row.writtenOff || row.billOffset) rows.push(row);
   }
   return rows;
 }
 
-/** 某月份的管理費銷帳彙總。 */
+/** 某月份的管理費銷帳彙總；應收依智生活帳單列出，帳單上沒有預收款、照帳單扣除的沖銷同時算在應收與已銷帳。 */
 export function monthWriteOff(result: AllocationResult, payments: Payment[], month: string): MonthWriteOff {
-  const out: MonthWriteOff = { month, units: 0, due: 0, writtenOff: 0, fromPrepaid: 0, fromCurrent: 0, fromLater: 0, owing: 0, owingUnits: 0 };
+  const out: MonthWriteOff = { month, units: 0, due: 0, billDue: 0, billUnits: 0, offset: 0, offsetUnits: 0, offsetShared: 0, billOffset: 0, billOffsetUnits: 0, billOffsetShared: 0, writtenOff: 0, fromPrepaid: 0, fromCurrent: 0, fromLater: 0, owing: 0, owingUnits: 0 };
   for (const r of monthWriteOffByUnit(result, payments, month)) {
-    if (r.due) out.units++;
-    out.due += r.due;
-    out.writtenOff += r.writtenOff;
+    if (r.due || r.billOffset) out.units++;
+    out.due += r.due + r.billOffset;
+    const billing = r.due - r.offset > 0;
+    if (billing) out.billUnits++;
+    out.billDue += r.due - r.offset;
+    if (r.offset > 0) {
+      if (billing) out.offsetShared++;
+      else out.offsetUnits++;
+    }
+    out.offset += r.offset;
+    if (r.billOffset) {
+      if (billing || r.offset > 0) out.billOffsetShared++;
+      else out.billOffsetUnits++;
+    }
+    out.billOffset += r.billOffset;
+    out.writtenOff += r.writtenOff + r.billOffset;
     out.fromPrepaid += r.fromPrepaid;
     out.fromCurrent += r.fromCurrent;
     out.fromLater += r.fromLater;

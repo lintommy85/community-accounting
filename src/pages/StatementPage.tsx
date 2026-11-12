@@ -48,6 +48,7 @@ export default function StatementPage() {
   const end = mode === 'month' ? monthEnd(month) : `${year}-12-31`;
   const pos = positionFor(data, start, end, fund);
   const r = mode === 'month' ? monthReport(data, month) : null;
+  const shared = (n: number) => (n ? `，另 ${n} 戶部分沖銷，戶數算在上面` : '');
   const periodText = mode === 'month' ? `${rocYear(Number(month.slice(0, 4)))}年${Number(month.slice(5))}月` : `${rocYear(year)}年度`;
   const title = withCommunity(data.settings, `${periodText}${fund ? `（${fund}）` : ''}收支報表`);
   const sub = `期間：${start} 至 ${end}　管理費收入認列：${basis === 'paid' ? '住戶繳費日' : '撥入銀行日'}（預收款全額列入收款當期）　單位：新臺幣元`;
@@ -187,10 +188,18 @@ export default function StatementPage() {
             <table className="report">
               <tbody>
                 <tr><th>本月應收管理費（{r.writeOff.units} 戶）</th><td className="num"><Money value={r.writeOff.due} /></td></tr>
+                {(r.writeOff.offset > 0 || r.writeOff.billOffset > 0) && (
+                  <>
+                    <tr className="sub-line"><th>　其中：智生活帳單本月應繳（{r.writeOff.billUnits} 戶）</th><td className="num"><Money value={r.writeOff.billDue} /></td></tr>
+                    {r.writeOff.offset > 0 && <tr className="sub-line"><th>　其中：帳單預繳沖銷，由預收款銷帳（{r.writeOff.offsetUnits} 戶{shared(r.writeOff.offsetShared)}）</th><td className="num"><Money value={r.writeOff.offset} /></td></tr>}
+                    {r.writeOff.billOffset > 0 && <tr className="sub-line"><th>　其中：帳單預繳沖銷，沒有期初預收款、照帳單扣除（{r.writeOff.billOffsetUnits} 戶{shared(r.writeOff.billOffsetShared)}）</th><td className="num"><Money value={r.writeOff.billOffset} /></td></tr>}
+                  </>
+                )}
                 <tr><th>本月已銷帳</th><td className="num"><Money value={r.writeOff.writtenOff} strong /></td></tr>
                 <tr className="sub-line"><th>　其中：以前月份預收轉銷</th><td className="num"><Money value={r.writeOff.fromPrepaid} /></td></tr>
                 <tr className="sub-line"><th>　其中：本月繳款</th><td className="num"><Money value={r.writeOff.fromCurrent} /></td></tr>
                 {r.writeOff.fromLater > 0 && <tr className="sub-line"><th>　其中：月底後補繳</th><td className="num"><Money value={r.writeOff.fromLater} /></td></tr>}
+                {r.writeOff.billOffset > 0 && <tr className="sub-line"><th>　其中：帳單預繳沖銷，照帳單扣除</th><td className="num"><Money value={r.writeOff.billOffset} /></td></tr>}
                 <tr className="total"><th>本月未繳（{r.writeOff.owingUnits} 戶）</th><td className="num"><Money value={r.writeOff.owing} strong /></td></tr>
               </tbody>
             </table>
