@@ -8,7 +8,11 @@
 
 ![版本](https://img.shields.io/badge/%E7%89%88%E6%9C%AC-0.8.0-2563eb) ![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows-0f172a) ![資料](https://img.shields.io/badge/%E8%B3%87%E6%96%99-%E5%8F%AA%E5%AD%98%E6%9C%AC%E6%A9%9F-16a34a)
 
-![總覽](docs/images/01-dashboard.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/01-dashboard.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/01-dashboard.png">
+  <img alt="總覽" src="docs/images/dark/01-dashboard.png">
+</picture>
 
 </div>
 
@@ -37,7 +41,11 @@
 從智生活匯出「管理費匯入範本」直接匯入。檔案內的戶別預設全部匯入，不需要管理的戶別（例如管理室）勾選「排除」即可。
 每次匯入都會比對所有權人：換人的戶別要選擇「從帳單月份起變更」，**之前月份的紀錄不會被改掉**。
 
-![匯入每月應繳報表](docs/images/02-bill-import.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/02-bill-import.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/02-bill-import.png">
+  <img alt="匯入每月應繳報表" src="docs/images/dark/02-bill-import.png">
+</picture>
 
 ### 2. 帳單項目對應基準，不同的逐戶確認
 
@@ -45,31 +53,51 @@
 帳單金額和基準不同的會逐戶列出，選「更新基準」或「不更新」後才能匯入。
 帳單上的沖銷項目（年繳沖銷、預繳沖銷……名稱不拘）對應到「沖銷」後，會用沖銷金額從這戶的預收款扣除；啟用前就已年繳、半年繳的戶別，可以在「期初預收款」輸入還剩多少，**匯入前或匯入後輸入都可以**，已匯入的月份會自動改由預收款沖銷。
 
-![和基準不同的逐戶確認](docs/images/03-bill-diffs.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/03-bill-diffs.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/03-bill-diffs.png">
+  <img alt="和基準不同的逐戶確認" src="docs/images/dark/03-bill-diffs.png">
+</picture>
 
 選過的項目對應都記在「基本設定 → 帳單項目對應」，可以修改、刪除，也能在匯入前先新增。
 
-![帳單項目對應](docs/images/13-bill-map.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/13-bill-map.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/13-bill-map.png">
+  <img alt="帳單項目對應" src="docs/images/dark/13-bill-map.png">
+</picture>
 
 ### 3. 基準與費率：坪數計費、加收、年繳季繳
 
 費率方案可以依坪數計算或固定金額，每戶另外加收車位清潔費並設定數量，也可以設定年繳、季繳與起始月份。
 調整費率只影響之後匯入的月份，已匯入的月份保留當時的基準。
 
-![基準與費率](docs/images/05-baseline.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/05-baseline.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/05-baseline.png">
+  <img alt="基準與費率" src="docs/images/dark/05-baseline.png">
+</picture>
 
 ### 4. 所有權人變更紀錄
 
 點所有權人可以看到每一段期間的所有權人，也能手動新增變更、修正錯字。
 每月應繳、帳卡、管理費銷帳都會依月份顯示**當時**的所有權人。
 
-![所有權人紀錄](docs/images/06-owner-history.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/06-owner-history.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/06-owner-history.png">
+  <img alt="所有權人紀錄" src="docs/images/dark/06-owner-history.png">
+</picture>
 
 ### 5. 每月應繳一覽
 
 選月份就能看到每戶的本期基準、智生活帳單、帳單內含逾期與本月應繳。這裡只能查看，應繳一律來自智生活報表。
 
-![每月應繳](docs/images/04-month-dues.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/04-month-dues.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/04-month-dues.png">
+  <img alt="每月應繳" src="docs/images/dark/04-month-dues.png">
+</picture>
 
 ### 6. 逐月銷帳與欠費總表
 
@@ -77,19 +105,31 @@
 同一份報表重複上傳時可以逐筆選擇要不要新增；期別在帳務起始月之前的繳款（繳的是啟用前的帳單）不會拿去銷之後的月份，也不會被算成暫收款。
 月份總表一眼看出誰欠了哪幾期，換過所有權人的戶別會標示「曾變更」。
 
-![欠費月份總表](docs/images/07-arrears.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/07-arrears.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/07-arrears.png">
+  <img alt="欠費月份總表" src="docs/images/dark/07-arrears.png">
+</picture>
 
 ### 7. 戶別帳卡
 
 每戶的逐月應繳、已銷、未繳與每筆繳款的銷帳情形，可以列印給住戶，也可以手動調整銷帳。
 
-![戶別帳卡](docs/images/08-unit-card.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/08-unit-card.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/08-unit-card.png">
+  <img alt="戶別帳卡" src="docs/images/dark/08-unit-card.png">
+</picture>
 
 ### 8. 撥款對帳與在途存款
 
 入帳日一律採用智生活報表上的日期，依入帳日與繳費方式分組，拿存摺逐筆核對。月底前還沒撥入銀行的款項，自動列為在途存款。
 
-![撥款對帳](docs/images/09-deposits.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/09-deposits.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/09-deposits.png">
+  <img alt="撥款對帳" src="docs/images/dark/09-deposits.png">
+</picture>
 
 ### 9. 月結與收支報表
 
@@ -98,9 +138,17 @@
 財務收支總表的固定／非固定在「基本設定 → 收支科目」勾選；匯入的管理費可以只把本期收入列為固定，逾期、預收、暫收另外決定。
 本月有繳款銷到以前月份時，要先在「逾期款項」把每一筆歸類到報表科目（例如「10月逾期汽車清潔費」，相同科目可以合併成一筆），歸類完才能列印月報；也可以列印逐戶的逾期銷帳明細（附簽章欄）。
 
-![月結](docs/images/10-month-close.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/10-month-close.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/10-month-close.png">
+  <img alt="月結" src="docs/images/dark/10-month-close.png">
+</picture>
 
-![收支報表](docs/images/11-statement.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/11-statement.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/11-statement.png">
+  <img alt="收支報表" src="docs/images/dark/11-statement.png">
+</picture>
 
 ### 10. 罰款與裝潢保證金
 
@@ -109,7 +157,11 @@
 完工後結算，跳出視窗顯示保證金、各項扣款與應退金額，選擇列入本月或下個月月報，分開輸入退款與匯款手續費，手續費可以單獨呈現或併入退款整筆呈現。報表上不顯示戶別、多戶合併成一筆，名稱可以修改，也可以勾選列為固定支出。
 建立系統前就已收、已含在帳戶期初餘額的保證金，登錄時勾「建立系統前已收」，只記在那戶，不影響帳戶餘額和報表。
 
-![裝潢保證金結算](docs/images/16-renovation-settle.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/16-renovation-settle.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/16-renovation-settle.png">
+  <img alt="裝潢保證金結算" src="docs/images/dark/16-renovation-settle.png">
+</picture>
 
 ### 11. 合約管理與財產管理
 
@@ -120,17 +172,23 @@
 
 零用金逐筆記錄、自動計算餘額，每月一鍵產生「零用金撥補」。收支報表只會出現撥補這一筆。
 
-![零用金](docs/images/12-petty-cash.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/12-petty-cash.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/12-petty-cash.png">
+  <img alt="零用金" src="docs/images/dark/12-petty-cash.png">
+</picture>
 
 ### 13. 深色／淺色模式與可收合的選單
 
-畫面預設深色，右上角的「淺色／深色」可以隨時切換，選擇會記在資料裡。收支報表、財務收支總表、管理費銷帳、催繳單在任何模式下都維持原本的彩色格式，列印也一律是白底。
-
-![淺色模式](docs/images/14-light-mode.png)
+畫面預設深色，右上角的「淺色／深色」可以隨時切換，選擇會記在資料裡。收支報表、財務收支總表、管理費銷帳、催繳單在任何模式下都維持原本的彩色格式，列印也一律是白底。這份說明裡的截圖會跟著 GitHub 的淺色／深色外觀自動切換。
 
 左邊選單最上方的按鈕可以把選單收合成只剩圖示，滑鼠移到圖示上會顯示名稱；「撥款對帳」上的數字是還沒拿存摺核對的撥款筆數。
 
-![收合的選單](docs/images/15-sidebar-collapsed.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark/15-sidebar-collapsed.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/light/15-sidebar-collapsed.png">
+  <img alt="收合的選單" src="docs/images/dark/15-sidebar-collapsed.png">
+</picture>
 
 ## 開始使用
 
