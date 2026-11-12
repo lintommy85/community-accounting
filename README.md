@@ -16,6 +16,10 @@
 
 </div>
 
+**介紹影片**（約 80 秒，主要功能與淺色／深色切換）
+
+https://github.com/user-attachments/assets/b1d35ad9-959b-477a-bbb6-a65ed0f57786
+
 > 畫面中的社區、戶別、人名與金額都是虛構的示範資料。
 
 ## 這是什麼

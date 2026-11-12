@@ -20,3 +20,6 @@ ledger*.json
 *.log
 .env*
 *.pem
+
+# 介紹影片原始檔（已上傳到 GitHub 附件，不放進 repo）
+docs/media/
