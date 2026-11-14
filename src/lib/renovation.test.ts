@@ -4,7 +4,7 @@ import { BILL_DEPOSIT, BILL_FINE, planBillImport, suggestBillItem } from './bill
 import { emptyData } from './defaults';
 import { applyDueChanges, diffDues, DueRow } from './dues';
 import { accountBalances } from './ledger';
-import { addRenovationOpening, cancelSettlement, computeDeductions, isBeforeOpening, openDepositSummary, renameRenovationLabel, renovationAfterCategoryRename, settleRenovation, unitDeposits } from './renovation';
+import { addRenovationOpening, cancelSettlement, computeDeductions, isBeforeOpening, openDepositSummary, removeDepositReceipt, removeRenovation, renameRenovationLabel, renovationAfterCategoryRename, settleRenovation, unitDeposits } from './renovation';
 import { buildStatement, monthPeriods, monthSheet } from './statement';
 import { AppData, Due, Payment, RenovationRateItem } from './types';
 
@@ -219,5 +219,48 @@ describe('建立系統前已收的保證金與手續費呈現方式', () => {
     expect(d.settings.expenseCategories).not.toContain('裝潢保證金退款手續費');
     expect(renovationAfterCategoryRename(d.settings, 'expense', '裝潢保證金退款', '保證金退還')).toMatchObject({ refundLabel: '保證金退還', feeLabel: '退款匯費' });
     expect(renovationAfterCategoryRename(d.settings, 'income', '裝潢保證金退款', 'X')).toBe(d.settings.renovation);
+  });
+});
+
+describe('刪除裝潢保證金', () => {
+  /** C 戶：手動登錄 5000、建立系統前已收 3000，已填施工開始日並套用方案。 */
+  function withProgress(): AppData {
+    let d = setup();
+    d.settings.units.push({ id: 'c', unitNo: 'C', owner: '陳', monthlyFee: 2000, note: '' });
+    d.entries = [{ id: 'm1', date: '2026-11-10', type: 'income', category: '裝潢保證金', accountId: 'acc_main', toAccountId: '', amount: 5000, counterparty: '', voucherNo: '115-0001', note: '', renovationKind: 'deposit', renovationUnit: 'C' }];
+    d = addRenovationOpening(d, { unitNo: 'C', date: '2026-09-15', amount: 3000, accountId: 'acc_main' });
+    d.renovations = [{ id: 'rn1', unitNo: 'C', planName: '一般', items: [], startDate: '2026-11-15', note: '', createdAt: '' }];
+    return d;
+  }
+  const infoOf = (d: AppData) => unitDeposits(d, allocateAll(d), '2026-11').get('C');
+
+  it('removes one receipt and keeps the start date and plan while other deposits remain', () => {
+    const d = withProgress();
+    const next = removeDepositReceipt(d, infoOf(d)!, 'm1');
+    expect(next.entries.some((e) => e.id === 'm1')).toBe(false);
+    expect(infoOf(next)).toMatchObject({ openTotal: 3000, renovation: { startDate: '2026-11-15', planName: '一般' } });
+  });
+
+  it('clears the start date and plan with the last deposit so the unit is no longer in progress', () => {
+    let d = withProgress();
+    d = removeDepositReceipt(d, infoOf(d)!, 'm1');
+    const openingId = infoOf(d)!.open[0].id;
+    const kept = removeDepositReceipt(d, infoOf(d)!, openingId);
+    expect(infoOf(kept)).toMatchObject({ openTotal: 0, renovation: { startDate: '2026-11-15' } });
+    const cleared = removeDepositReceipt(d, infoOf(d)!, openingId, true);
+    expect(cleared.renovationOpenings).toEqual([]);
+    expect(cleared.renovations).toEqual([]);
+    expect(infoOf(cleared)).toBeUndefined();
+  });
+
+  it('leaves deposits paid through the bills alone and never removes settled records', () => {
+    const d = setup();
+    d.payments = [pay('p1', 'B', '2026-11-05', 10000, '115/11', '裝潢保證金')];
+    const b = unitDeposits(d, allocateAll(d), '2026-11').get('B')!;
+    expect(b.open.map((x) => x.source)).toEqual(['payment']);
+    expect(removeDepositReceipt(d, b, b.open[0].id, true)).toBe(d);
+    const settled = settleRenovation(d, { unitNo: 'B', planName: '無費率', items: [], startDate: '', deposit: b.openTotal, receiptIds: b.open.map((x) => x.id), deductions: [], refund: 10000, fee: 0, date: '2026-11-28', accountId: 'acc_main' });
+    const id = settled.renovations[0].id;
+    expect(removeRenovation(settled, id).renovations.map((r) => r.id)).toEqual([id]);
   });
 });

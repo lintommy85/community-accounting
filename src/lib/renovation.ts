@@ -180,6 +180,24 @@ export function cancelSettlement(data: AppData, renovationId: string): AppData {
   return { ...data, entries: data.entries.filter((e) => !ids.has(e.id)), renovations: data.renovations.map((x) => (x.id === renovationId ? rest : x)) };
 }
 
+/**
+ * 刪除一筆還沒結算的保證金收款（手動登錄的分錄，或建立系統前已收的紀錄）；智生活繳費的收款不能在這裡刪除。
+ * clearRenovation 為 true 時，連同這戶進行中的施工開始日與費率方案一起清除（這戶刪完沒有其他保證金時使用）。
+ */
+export function removeDepositReceipt(data: AppData, info: UnitDeposit, receiptId: string, clearRenovation = false): AppData {
+  const receipt = info.open.find((x) => x.id === receiptId);
+  if (!receipt || receipt.source === 'payment') return data;
+  const next: AppData = receipt.source === 'manual'
+    ? { ...data, entries: data.entries.filter((e) => e.id !== receiptId) }
+    : { ...data, renovationOpenings: (data.renovationOpenings ?? []).filter((o) => o.id !== receiptId) };
+  return clearRenovation && info.renovation ? removeRenovation(next, info.renovation.id) : next;
+}
+
+/** 清除一戶進行中的裝修紀錄（施工開始日、費率方案）；已結算的紀錄不受影響。 */
+export function removeRenovation(data: AppData, renovationId: string): AppData {
+  return { ...data, renovations: data.renovations.filter((r) => r.id !== renovationId || !!r.settlement) };
+}
+
 /** 修改報表名稱：連同已建立的分錄、收支科目與「固定」勾選一起改，報表同步更新；舊名稱還有其他分錄在用時保留在科目清單。 */
 export function renameRenovationLabel(data: AppData, kind: RenovationLabelKind, next: string): AppData {
   const cfg = renovationSettings(data.settings);

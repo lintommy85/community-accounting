@@ -7,7 +7,7 @@ import { addMonths, todayStr } from '../lib/dates';
 import { newId, resolveDepositAccountId } from '../lib/defaults';
 import { activeUnits, sortUnits } from '../lib/fees';
 import { nextVoucher } from '../lib/ledger';
-import { addRenovationOpening, computeDeductions, isBeforeOpening, renameRenovationLabel, RenovationLabelKind, renovationSettings, settleRenovation, cancelSettlement, UnitDeposit, unitDeposits } from '../lib/renovation';
+import { addRenovationOpening, computeDeductions, isBeforeOpening, removeDepositReceipt, removeRenovation, renameRenovationLabel, RenovationLabelKind, renovationSettings, settleRenovation, cancelSettlement, UnitDeposit, unitDeposits } from '../lib/renovation';
 import { AppData, Renovation, RenovationFeeMode, RenovationPlan, RenovationRateItem, RenovationSettings } from '../lib/types';
 import { useStore } from '../store';
 
@@ -165,18 +165,29 @@ function UnitRenovation({ info, onClose }: { info: UnitDeposit; onClose: () => v
     setMsg('');
   }
 
-  function removeOpening(id: string) {
-    const o = data.renovationOpenings?.find((x) => x.id === id);
-    if (!o || !confirm(`刪除 ${o.date} 建立系統前已收的保證金 ${fmt(o.amount)} 元？`)) return;
-    update((d) => ({ ...d, renovationOpenings: (d.renovationOpenings ?? []).filter((x) => x.id !== id) }), '刪除建立系統前已收的裝潢保證金', `${info.unitNo} ${o.date} ${o.amount}`);
+  /** 刪除還沒結算的保證金；這戶刪完沒有其他保證金、又有施工開始日或費率方案時，詢問要不要一起清除。 */
+  function removeReceipt(id: string) {
+    const x = info.open.find((o) => o.id === id);
+    if (!x) return;
+    if (x.source === 'manual' && isClosed(x.date)) return setMsg('該月份已結帳，請先解除月結');
+    const what = x.source === 'opening' ? '建立系統前已收' : '手動登錄';
+    if (!confirm(`刪除 ${x.date} ${what}的保證金 ${fmt(x.amount)} 元？`)) return;
+    const last = !info.open.some((o) => o.id !== id);
+    const clear = last && !!r && confirm('這戶已經沒有其他保證金了，要一起清除施工開始日與費率方案，讓這戶不再列在「進行中」嗎？\n（按「取消」只刪除這筆保證金）');
+    update(
+      (d) => removeDepositReceipt(d, info, id, clear),
+      x.source === 'opening' ? '刪除建立系統前已收的裝潢保證金' : '刪除裝潢保證金',
+      `${info.unitNo} ${x.date} ${x.amount}${clear ? '，並清除施工開始日與費率方案' : ''}`,
+    );
+    setMsg('');
   }
 
-  function removeManual(id: string) {
-    const e = data.entries.find((x) => x.id === id);
-    if (!e) return;
-    if (isClosed(e.date)) return setMsg('該月份已結帳，請先解除月結');
-    if (!confirm(`刪除 ${e.date} 手動登錄的保證金 ${fmt(e.amount)} 元？`)) return;
-    update((d) => ({ ...d, entries: d.entries.filter((x) => x.id !== id) }), '刪除裝潢保證金', `${info.unitNo} ${e.date} ${e.amount}`);
+  function clearProgress() {
+    if (!r) return;
+    const detail = [r.startDate && `施工開始日 ${r.startDate}`, r.planName && `費率方案「${r.planName}」`].filter(Boolean).join('、') || '進行中的紀錄';
+    if (!confirm(`清除這戶的${detail}？收到的保證金與結算紀錄不受影響。`)) return;
+    update((d) => removeRenovation(d, r.id), '清除裝潢施工紀錄', `${info.unitNo} ${detail}`);
+    setDays({});
   }
 
   function cancel(x: Renovation) {
@@ -205,8 +216,7 @@ function UnitRenovation({ info, onClose }: { info: UnitDeposit; onClose: () => v
                 <td>{x.source === 'payment' ? <span className="tag info">智生活繳費</span> : x.source === 'opening' ? <span className="tag purple" title="已含在帳戶期初餘額，不影響帳戶餘額與報表">建立系統前已收</span> : <span className="tag">手動登錄</span>}</td>
                 <td className="num"><Money value={x.amount} /></td>
                 <td>
-                  {x.source === 'manual' && <button className="link danger" onClick={() => removeManual(x.id)}>刪除</button>}
-                  {x.source === 'opening' && <button className="link danger" onClick={() => removeOpening(x.id)}>刪除</button>}
+                  {x.source !== 'payment' && <button className="link danger" onClick={() => removeReceipt(x.id)}>刪除</button>}
                 </td>
               </tr>
             ))}
@@ -251,6 +261,7 @@ function UnitRenovation({ info, onClose }: { info: UnitDeposit; onClose: () => v
           </select>
         </label>
         <button onClick={applyPlan}>{r?.planName ? '改用這個方案' : '套用方案'}</button>
+        {r && <button className="danger" onClick={clearProgress}>清除施工開始日與方案</button>}
       </div>
       {r?.planName ? (
         <p className="hint">這戶套用「{r.planName}」（套用當時的內容，之後修改方案不影響這戶）。</p>
