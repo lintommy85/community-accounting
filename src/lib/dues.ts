@@ -12,7 +12,11 @@ export const BILL_FINE = '__fine__';
 export const BILL_DEPOSIT = '__deposit__';
 
 /** 去掉智生活項目名稱前的年月，例如「11月坪數費」→「坪數費」、「115年1~12月管理費」→「管理費」、「10月未繳管理費」→「未繳管理費」。 */
-export const billItemName = (item: string) => item.replace(/^\s*(\d{2,3}\s*年\s*)?\d{1,2}\s*([-~～至到]\s*\d{1,2}\s*)?月(份)?\s*/, '').trim() || item.trim();
+export const billItemName = (item: string) =>
+  item
+    .replace(/^\s*(\d{2,3}\s*年\s*)?\d{1,2}\s*([-~～至到]\s*\d{1,2}\s*)?月(份)?\s*/, '')
+    .replace(/^\s*\d{2,4}\s*年度?\s*(?=[^\d\s])/, '')
+    .trim() || item.trim();
 /** 系統沒有這戶的預繳款（例如啟用本系統前預繳）時，沖銷照帳單減少應繳；之後有預收款時，銷帳會自動改由預收款沖銷。 */
 export const PREPAID_BEFORE_ITEM = '預繳沖銷（啟用前預繳）';
 

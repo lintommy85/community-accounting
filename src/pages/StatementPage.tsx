@@ -5,15 +5,17 @@ import { arrearsLines } from '../lib/arrears';
 import FinanceSheet from '../components/FinanceSheet';
 import IncomeExpenseTable from '../components/IncomeExpenseTable';
 import PrepaidSheet from '../components/PrepaidSheet';
+import { PrepaidBlock, ReceivableBlock } from '../components/ReportBlocks';
 import Signatures from '../components/Signatures';
 import WriteOffSheet from '../components/WriteOffSheet';
 import { useNavArg } from '../components/nav';
-import { lastMonth, Money, MonthInput, Section } from '../components/ui';
+import { Money, MonthInput, Section, thisMonth } from '../components/ui';
 import { Icon } from '../components/icons';
-import { allocateAll, prepaidLedger } from '../lib/allocation';
+import { allocateAll, prepaidLedger, prepaidTotals } from '../lib/allocation';
 import { monthEnd } from '../lib/dates';
-import { withCommunity } from '../lib/defaults';
+import { resolveDepositAccountId, withCommunity } from '../lib/defaults';
 import { monthReport } from '../lib/ledger';
+import { receivableRollForward } from '../lib/receivable';
 import { downloadBlob } from '../lib/storage';
 import { Basis, buildStatement, FundFilter, monthPeriods, positionFor, rocYear, StatementLine, yearPeriods } from '../lib/statement';
 import { exportStatement } from '../lib/xlsxio';
@@ -26,8 +28,8 @@ export default function StatementPage() {
   const { data } = useStore();
   const navArg = useNavArg();
   const [mode, setMode] = useState<Mode>('month');
-  const [month, setMonth] = useState(/^\d{4}-\d{2}$/.test(navArg) ? navArg : lastMonth());
-  const [year, setYear] = useState(Number(lastMonth().slice(0, 4)));
+  const [month, setMonth] = useState(/^\d{4}-\d{2}$/.test(navArg) ? navArg : thisMonth());
+  const [year, setYear] = useState(Number(thisMonth().slice(0, 4)));
   const [basis, setBasis] = useState<Basis>('paid');
   const [fund, setFund] = useState<FundFilter>('');
   const [printMode, setPrintMode] = useState<PrintMode>('statement');
@@ -36,6 +38,8 @@ export default function StatementPage() {
   const hasUnits = data.settings.units.some((u) => !u.deletedAt);
   const alloc = useMemo(() => (hasUnits ? allocateAll(data) : null), [data, hasUnits]);
   const prepaid = useMemo(() => (mode === 'month' && alloc ? prepaidLedger(alloc, month) : null), [alloc, mode, month]);
+  const prepaidSum = useMemo(() => (prepaid ? prepaidTotals(prepaid.rows) : null), [prepaid]);
+  const receivable = useMemo(() => (mode === 'month' && alloc ? receivableRollForward(data, alloc, month) : null), [data, alloc, mode, month]);
   // 本月繳款銷到以前月份的逾期款項：要先歸類報表科目才能列印月報
   const arrears = useMemo(() => (mode === 'month' && alloc ? arrearsLines(data, month, alloc) : []), [data, alloc, mode, month]);
   const unclassified = arrears.filter((l) => !l.label).length;
@@ -47,12 +51,23 @@ export default function StatementPage() {
   const start = mode === 'month' ? `${month}-01` : `${year}-01-01`;
   const end = mode === 'month' ? monthEnd(month) : `${year}-12-31`;
   const pos = positionFor(data, start, end, fund);
-  const r = mode === 'month' ? monthReport(data, month) : null;
+  const r = mode === 'month' ? monthReport(data, month, basis) : null;
   const shared = (n: number) => (n ? `，另 ${n} 戶部分沖銷，戶數算在上面` : '');
+  const w = r?.writeOff;
+  const receivedParts: [string, number][] = w
+    ? ([
+        ['銷本月應收', w.fromCurrent],
+        ['補繳以前月份', w.receivedArrears],
+        ['起始月前的帳單', w.receivedBeforeStart],
+        ['預收（銷以後月份、多繳）', w.receivedPrepaid],
+        ['暫收（期別的每月應繳還沒匯入）', w.receivedPending],
+        ['未對應門牌', w.receivedUnmatched],
+      ] as [string, number][]).filter(([, v]) => v !== 0)
+    : [];
   const periodText = mode === 'month' ? `${rocYear(Number(month.slice(0, 4)))}年${Number(month.slice(5))}月` : `${rocYear(year)}年度`;
   const title = withCommunity(data.settings, `${periodText}${fund ? `（${fund}）` : ''}收支報表`);
   const sub = `期間：${start} 至 ${end}　管理費收入認列：${basis === 'paid' ? '住戶繳費日' : '撥入銀行日'}（預收款全額列入收款當期）　單位：新臺幣元`;
-  const years = Array.from({ length: 8 }, (_, i) => Number(lastMonth().slice(0, 4)) + 1 - i);
+  const years = Array.from({ length: 8 }, (_, i) => Number(thisMonth().slice(0, 4)) + 1 - i);
   const wide = mode === 'year';
 
   function print(m: PrintMode) {
@@ -125,7 +140,7 @@ export default function StatementPage() {
 
       {r && (
         <div className="print-only print-report">
-          <FinanceSheet data={data} month={month} report={r} />
+          <FinanceSheet data={data} month={month} report={r} prepaid={prepaidSum} receivable={receivable} />
         </div>
       )}
 
@@ -166,6 +181,22 @@ export default function StatementPage() {
             {pos.suspense !== 0 && <tr className="sub-line"><th>其中：暫收款（期別的每月應繳還沒匯入）</th><td></td><td></td><td></td><td className="num"><Money value={pos.suspense} /></td></tr>}
           </tbody>
         </table>
+        {pos.balances.some((b) => b.accountId === resolveDepositAccountId(data.settings)) && (
+          <>
+            {prepaidSum && <PrepaidBlock totals={prepaidSum} settings={data.settings} />}
+            {receivable && (
+              <>
+                <ReceivableBlock rf={receivable} settings={data.settings} />
+                <p className={`hint no-print${receivable.result === receivable.owing ? '' : ' warn'}`}>
+                  核對：月底時所有戶別帳卡的欠費合計 {receivable.owing.toLocaleString('zh-TW')} 元（{receivable.owingUnits} 戶），
+                  {receivable.result === receivable.owing
+                    ? '和上面的結果相同。'
+                    : `上面的結果比帳卡${receivable.result > receivable.owing ? '多' : '少'} ${Math.abs(receivable.result - receivable.owing).toLocaleString('zh-TW')} 元。${receivable.baseline - receivable.due ? `本月應收用基準費率加總是 ${receivable.baseline.toLocaleString('zh-TW')} 元，帳卡的本月應收是 ${receivable.due.toLocaleString('zh-TW')} 元（差 ${(receivable.baseline - receivable.due).toLocaleString('zh-TW')} 元）；請到「基本設定 → 月報欄位名稱與可選的帳單項目」加入造成差額的帳單項目，例如減免。` : ''}`}
+                </p>
+              </>
+            )}
+          </>
+        )}
         <Signatures />
       </section>
 
@@ -195,15 +226,17 @@ export default function StatementPage() {
                     {r.writeOff.billOffset > 0 && <tr className="sub-line"><th>　其中：帳單預繳沖銷，沒有期初預收款、照帳單扣除（{r.writeOff.billOffsetUnits} 戶{shared(r.writeOff.billOffsetShared)}）</th><td className="num"><Money value={r.writeOff.billOffset} /></td></tr>}
                   </>
                 )}
-                <tr><th>本月已銷帳</th><td className="num"><Money value={r.writeOff.writtenOff} strong /></td></tr>
+                <tr><th>本月已銷帳</th><td className="num"><Money value={r.writeOff.total} strong /></td></tr>
                 <tr className="sub-line"><th>　其中：以前月份預收轉銷</th><td className="num"><Money value={r.writeOff.fromPrepaid} /></td></tr>
-                <tr className="sub-line"><th>　其中：本月繳款</th><td className="num"><Money value={r.writeOff.fromCurrent} /></td></tr>
-                {r.writeOff.fromLater > 0 && <tr className="sub-line"><th>　其中：月底後補繳</th><td className="num"><Money value={r.writeOff.fromLater} /></td></tr>}
+                <tr className="sub-line"><th>　其中：本月繳款（{basis === 'deposit' ? '依入帳日' : '依繳費日'}，{r.paidList.length} 筆）</th><td className="num"><Money value={r.writeOff.received} /></td></tr>
+                {receivedParts.length > 1 && receivedParts.map(([label, v]) => <tr key={label} className="sub-line"><th>　　{label}</th><td className="num"><Money value={v} /></td></tr>)}
+                {r.writeOff.fromLater > 0 && <tr className="sub-line"><th>　其中：{basis === 'deposit' ? '月底後才入帳（含還沒入帳）' : '月底後補繳'}</th><td className="num"><Money value={r.writeOff.fromLater} /></td></tr>}
                 {r.writeOff.billOffset > 0 && <tr className="sub-line"><th>　其中：帳單預繳沖銷，照帳單扣除</th><td className="num"><Money value={r.writeOff.billOffset} /></td></tr>}
                 <tr className="total"><th>本月未繳（{r.writeOff.owingUnits} 戶）</th><td className="num"><Money value={r.writeOff.owing} strong /></td></tr>
               </tbody>
             </table>
             {showDetail && <WriteOffSheet data={data} month={month} report={r} />}
+            <p className="hint">本月繳款是依上方認列方式列入本月的管理費繳款，不含罰款、裝潢保證金；選「依入帳日認列」可以和撥入銀行的金額對帳。本月未繳只扣掉銷本月應收的部分。</p>
             <p className="hint">「列印管理費銷帳」會印出本月繳費紀錄（已繳）與截至本月尚未繳清的應繳（未繳，每個月分開列出）。</p>
           </Section>
           <div className="print-only print-writeoff">
@@ -211,7 +244,7 @@ export default function StatementPage() {
           </div>
         </>
       )}
-      {prepaid && (
+      {prepaid && prepaidSum && (
         <>
           <Section
             title={`${month} 預收款項`}
@@ -220,14 +253,14 @@ export default function StatementPage() {
           >
             <table className="report">
               <tbody>
-                <tr><th>上月底預收款</th><td className="num"><Money value={prepaid.rows.reduce((t, x) => t + x.opening, 0)} /></td></tr>
-                <tr><th>＋ 本月新增（預繳、多繳）</th><td className="num"><Money value={prepaid.rows.reduce((t, x) => t + x.added, 0)} /></td></tr>
-                <tr><th>－ 本月沖銷</th><td className="num"><Money value={prepaid.rows.reduce((t, x) => t + x.used, 0)} /></td></tr>
-                <tr className="total"><th>＝ 月底預收款（{prepaid.rows.filter((x) => x.closing).length} 戶）</th><td className="num"><Money value={prepaid.rows.reduce((t, x) => t + x.closing, 0)} strong /></td></tr>
+                <tr><th>上月底預收款</th><td className="num"><Money value={prepaidSum.opening} /></td></tr>
+                <tr><th>＋ 本月新增（預繳、多繳）</th><td className="num"><Money value={prepaidSum.added} /></td></tr>
+                <tr><th>－ 本月沖銷</th><td className="num"><Money value={prepaidSum.used} /></td></tr>
+                <tr className="total"><th>＝ 本月底剩餘預收款（{prepaidSum.households} 戶）</th><td className="num"><Money value={prepaidSum.closing} strong /></td></tr>
               </tbody>
             </table>
             {showPrepaid && <PrepaidSheet data={data} month={month} rows={prepaid.rows} uses={prepaid.uses} />}
-            <p className="hint">「列印預收款項銷帳紀錄」會印出逐戶的預收款增減（上月底＋本月新增－本月沖銷＝月底），以及本月由預收款沖銷的明細（帳單沖銷、依期別、自動銷帳）。</p>
+            <p className="hint">「列印預收款項銷帳紀錄」會印出逐戶的預收款增減（上月底＋本月新增－本月沖銷＝本月底剩餘），以及本月由預收款沖銷的明細（帳單沖銷、依期別、自動銷帳）。</p>
           </Section>
           <div className="print-only print-prepaid">
             <PrepaidSheet data={data} month={month} rows={prepaid.rows} uses={prepaid.uses} printOnly />

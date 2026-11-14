@@ -455,7 +455,7 @@ label.other-item input { border-color: var(--accent); box-shadow: 0 0 0 2px var(
 .profile-hint { color: var(--muted); font-size: 0.85rem; display: flex; gap: 0.667rem; align-items: center; }
 
 /* ---------- 彈出視窗 ---------- */
-.modal-backdrop { position: fixed; inset: 0; background: var(--backdrop); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 1.067rem; }
+.modal-backdrop { position: fixed; inset: 0; max-width: none; background: var(--backdrop); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 1.067rem; }
 .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 1.2rem; padding: 1.4rem 1.6rem; max-width: 32rem; width: 100%; max-height: calc(100vh - 2.2rem); overflow-y: auto; box-shadow: var(--shadow-pop); }
 .modal.wide { max-width: 42.667rem; }
 .modal h2 { margin-bottom: 0.4rem; }
@@ -558,6 +558,8 @@ table.statement tr.st-net th, table.statement tr.st-net td, table.statement-bala
 .fin-sheet .fs-accounts td.fs-num { font-weight: 400; color: #555; }
 .fin-sheet .fs-acc-total td { background: #fdf1cb; font-weight: 700; color: #111 !important; }
 .fin-sheet .signatures { margin-top: 14px; }
+.fin-sheet .fs-section { break-after: avoid; page-break-after: avoid; }
+.fin-sheet .fs-receivable, .fin-sheet .signatures { break-inside: avoid; page-break-inside: avoid; }
 .fin-sheet .sig-table th { background: #f2f2f2; }
 label.check.fee-fixed { margin: 0 0 0.4rem; font-size: 0.85rem; }
 @page { size: A4; margin: 10mm; }
@@ -657,7 +659,7 @@ label.check.fee-fixed { margin: 0 0 0.4rem; font-size: 0.85rem; }
   .page-head:not(:has(> :not(h1))) { display: none; }
 }
 @media screen and (prefers-reduced-motion: no-preference) {
-  .main > :not(.topbar) { animation: rise 0.28s ease backwards; }
+  .main > :not(.topbar, .modal-backdrop) { animation: rise 0.28s ease backwards; }
   .modal { animation: pop 0.22s ease backwards; }
   .nav-tip { animation: tip-in 0.16s ease backwards; }
 }

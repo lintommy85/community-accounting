@@ -3,7 +3,7 @@ import AllocationEditor from '../components/AllocationEditor';
 import { Money, MonthInput, Section, thisMonth } from '../components/ui';
 import { newId } from '../lib/defaults';
 import { todayStr } from '../lib/dates';
-import { allocateAll, normUnit } from '../lib/allocation';
+import { allocateAll, chargeKindOfItem, normUnit } from '../lib/allocation';
 import { channelLabel, isMonthEndInTransit, netAmount } from '../lib/ledger';
 import { Payment } from '../lib/types';
 import { useStore } from '../store';
@@ -77,9 +77,11 @@ export default function PaymentsPage() {
             <tbody>
               {list.slice(0, LIMIT).map((p) => {
                 const locked = isClosed(p.paidDate) || (!!p.depositDate && isClosed(p.depositDate));
+                const kind = chargeKindOfItem(p.item, data.settings);
                 return (
                   <tr key={p.id} className={p.voided ? 'voided' : ''}>
-                    <td>{p.unitNo}</td><td>{p.payerName}</td><td>{p.billPeriod}</td><td>{p.item}</td><td>{p.paidDate}</td>
+                    <td>{p.unitNo}</td><td>{p.payerName}</td><td>{p.billPeriod}</td>
+                    <td>{p.item}{kind && <span className="tag purple">{kind === 'deposit' ? '裝潢保證金' : '罰款'}</span>}</td><td>{p.paidDate}</td>
                     <td>{channelLabel(p)}</td>
                     <td className="num"><Money value={p.amount} /></td>
                     <td className="num"><Money value={netAmount(p)} /></td>
@@ -95,7 +97,9 @@ export default function PaymentsPage() {
                     </td>
                     <td className="note-cell" title={p.note}>{p.note}</td>
                     <td className="row-actions">
-                      {!p.voided && (alloc.byKey.has(normUnit(p.unitNo)) ? (
+                      {!p.voided && (kind ? (
+                        <span className="muted" title="罰款、裝潢保證金不銷管理費；要改類型請到「基本設定 → 帳單項目對應」">不銷管理費</span>
+                      ) : alloc.byKey.has(normUnit(p.unitNo)) ? (
                         <button className="link" onClick={() => setEditing(p)}>調整銷帳</button>
                       ) : (
                         <span className="muted" title="戶別不在戶別清單中（或已刪除），無法銷帳">—</span>

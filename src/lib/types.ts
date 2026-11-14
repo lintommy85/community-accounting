@@ -119,6 +119,14 @@ export interface Settings {
   arrearsMerge?: Record<string, boolean>;
   /** 到期提醒：到期（或申報期限）前幾個月開始高亮提醒；沒設定時合約、設備證書 3 個月，政府申報 6 個月。 */
   reminders?: Partial<ReminderMonths>;
+  /** 月報「預收款項變動」與「應收（未繳）管理費變動」的欄位名稱與可選的帳單項目。 */
+  reportFields?: ReportFields;
+}
+
+/** 月報欄位設定：labels 是改過的欄位名稱（沒有或空白用預設名稱）；items 是可選的帳單項目，本月帳單上的金額在公式中減掉。 */
+export interface ReportFields {
+  labels?: Record<string, string>;
+  items?: { bill: string; label?: string }[];
 }
 
 export interface ReminderMonths {

@@ -1,12 +1,12 @@
 import { addMonths, monthEnd, monthRange } from './dates';
-import { AllocationResult, allocateAll, receiptBreakdown, receiptBreakdownBy } from './allocation';
+import { AllocationResult, allocateAll, DateBasis, receiptBreakdown, receiptBreakdownBy } from './allocation';
 import { FINE_LABEL, renovationSettings } from './renovation';
 import { arrearsLines, arrearsReportLines } from './arrears';
 import { resolveDepositAccountId } from './defaults';
 import { AccountBalance, accountBalances, active, advancesFor, inTransitAt, netAmount } from './ledger';
 import { Account, AppData, SignatureSlot } from './types';
 
-export type Basis = 'paid' | 'deposit';
+export type Basis = DateBasis;
 export type FundFilter = '' | Account['fund'];
 
 export interface StatementOptions {

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { isEnterKey, Money, MonthInput, Section, thisMonth } from '../components/ui';
 import { Icon } from '../components/icons';
-import { monthEnd, todayStr } from '../lib/dates';
+import { monthEnd, monthOf, todayStr } from '../lib/dates';
 import { newId, PETTY_OTHER, resolveDepositAccountId } from '../lib/defaults';
-import { pettyLedger, pettyOfMonth, pettyTotal, replenishmentOf, upsertReplenishment } from '../lib/petty';
+import { defaultReplenishDate, pettyLedger, pettyOfMonth, pettyTotal, replenishmentOf, replenishReportMonths, upsertReplenishment } from '../lib/petty';
 import { LedgerEntry, PettyCashEntry } from '../lib/types';
 import { useStore } from '../store';
 
@@ -30,14 +30,26 @@ export default function PettyCashPage() {
   const blank = () => ({ date: todayStr().startsWith(month) ? todayStr() : `${month}-01`, category: categories[0] ?? PETTY_OTHER, other: '', amount: '', payee: '', note: '' });
   const [f, setF] = useState(blank);
   const [msg, setMsg] = useState('');
-  const [replDate, setReplDate] = useState(monthEnd(month));
+  const [nextMonth] = replenishReportMonths(month);
+  const [reportMonth, setReportMonth] = useState(() => (repl ? monthOf(repl.date) : nextMonth));
+  const [replDate, setReplDate] = useState(() => repl?.date ?? defaultReplenishDate(month, nextMonth));
   const [replAccount, setReplAccount] = useState(resolveDepositAccountId(settings) || banks[0]?.id || '');
+  const [replMsg, setReplMsg] = useState('');
 
   useEffect(() => {
     setF((prev) => (prev.date.startsWith(month) ? prev : { ...prev, date: todayStr().startsWith(month) ? todayStr() : `${month}-01` }));
-    setReplDate(repl?.date ?? monthEnd(month));
+    const rm = repl ? monthOf(repl.date) : replenishReportMonths(month)[0];
+    setReportMonth(rm);
+    setReplDate(repl?.date ?? defaultReplenishDate(month, rm));
     if (repl) setReplAccount(repl.accountId);
+    setReplMsg('');
   }, [month, repl?.id]);
+
+  function chooseReportMonth(m: string) {
+    setReportMonth(m);
+    setReplDate(repl?.date.startsWith(m) ? repl.date : defaultReplenishDate(month, m));
+    setReplMsg('');
+  }
 
   function add() {
     const amount = Number(f.amount);
@@ -60,12 +72,14 @@ export default function PettyCashPage() {
   }
 
   function replenish() {
-    if (!replAccount) return setMsg('請先在「基本設定」建立銀行帳戶');
-    if (isClosed(replDate)) return setMsg('撥補日期所在月份已結帳，請先解除月結');
+    if (!replAccount) return setReplMsg('請先在「基本設定」建立銀行帳戶');
+    if (!replDate.startsWith(reportMonth)) return setReplMsg(`撥補日期要在 ${reportMonth} 內，才會列入 ${reportMonth} 的月報`);
+    if (isClosed(replDate)) return setReplMsg('撥補日期所在月份已結帳，請先解除月結');
+    setReplMsg('');
     update(
       (d) => ({ ...d, entries: upsertReplenishment(d.entries, month, { date: replDate, accountId: replAccount, amount: total, voucherNo: nextVoucher(d.entries, replDate) }) }),
       repl ? '更新零用金撥補' : '零用金撥補',
-      `${month} ${total}`,
+      `${month} ${total}，列入 ${reportMonth} 月報`,
     );
   }
 
@@ -78,6 +92,11 @@ export default function PettyCashPage() {
   const ledger = pettyLedger(data.pettyCash, data.entries, fund, month);
   const current = pettyLedger(data.pettyCash, data.entries, fund, todayStr().slice(0, 7));
   const status = !repl ? (total ? 'none' : 'empty') : repl.amount === total ? 'ok' : 'diff';
+  const replClosed = !!repl && isClosed(repl.date);
+  const targetClosed = isClosed(`${reportMonth}-01`);
+  const changed = !repl || repl.amount !== total || repl.date !== replDate || repl.accountId !== replAccount;
+  const monthOptions: [string, string][] = [[nextMonth, `${nextMonth}（下個月）`], [month, `${month}（本月）`]];
+  if (!monthOptions.some(([m]) => m === reportMonth)) monthOptions.push([reportMonth, reportMonth]);
 
   return (
     <>
@@ -181,20 +200,29 @@ export default function PettyCashPage() {
       </Section>
 
       <Section title={`${month} 零用金撥補`} className="no-print">
-        <p className="hint">撥補金額＝本月零用金使用總額，會在收支記帳產生一筆支出「零用金撥補」，從下列銀行帳戶支出。</p>
+        <p className="hint">撥補金額＝本月零用金使用總額，會在收支記帳產生一筆支出「零用金撥補」，從下列銀行帳戶支出。撥補預設列入下個月的月報（撥補日期在下個月）；要列在本月的月報，「列入月報」請選本月。</p>
         <div className="form-row">
-          <label>撥補日期<input type="date" value={replDate} onChange={(e) => setReplDate(e.target.value)} /></label>
+          <label>列入月報
+            <select value={reportMonth} disabled={replClosed} onChange={(e) => chooseReportMonth(e.target.value)}>
+              {monthOptions.map(([m, text]) => <option key={m} value={m}>{text}</option>)}
+            </select>
+          </label>
+          <label>撥補日期<input type="date" value={replDate} min={`${reportMonth}-01`} max={monthEnd(reportMonth)} disabled={replClosed} onChange={(e) => setReplDate(e.target.value)} /></label>
           <label>從帳戶
-            <select value={replAccount} onChange={(e) => setReplAccount(e.target.value)}>
+            <select value={replAccount} disabled={replClosed} onChange={(e) => setReplAccount(e.target.value)}>
               {banks.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </label>
           <span>撥補金額 <Money value={total} strong /> 元</span>
-          <button className="primary" disabled={!total || locked || status === 'ok'} onClick={replenish}>{repl ? '更新撥補金額' : '產生零用金撥補'}</button>
-          {repl && <button className="danger" disabled={isClosed(repl.date)} onClick={removeReplenishment}>刪除撥補</button>}
+          <button className="primary" disabled={!total || !changed || replClosed || targetClosed} onClick={replenish}>{repl ? '更新撥補' : '產生零用金撥補'}</button>
+          {repl && <button className="danger" disabled={replClosed} onClick={removeReplenishment}>刪除撥補</button>}
         </div>
-        {status === 'ok' && <p className="ok">已撥補：{repl!.date} 從「{settings.accounts.find((a) => a.id === repl!.accountId)?.name}」支出 {repl!.amount.toLocaleString('zh-TW')} 元（傳票 {repl!.voucherNo}）。</p>}
-        {status === 'diff' && <p className="warn">已撥補 {repl!.amount.toLocaleString('zh-TW')} 元，但目前使用總額為 {total.toLocaleString('zh-TW')} 元，請按「更新撥補金額」。</p>}
+        {replMsg && <p className="err">{replMsg}</p>}
+        {replClosed && <p className="warn">撥補日期所在的 {monthOf(repl!.date)} 已結帳，不能修改或刪除這筆撥補。</p>}
+        {!replClosed && targetClosed && <p className="warn">{reportMonth} 已結帳，不能列入這個月的月報；請改選其他月份，或先解除月結。</p>}
+        {status === 'ok' && <p className="ok">已撥補：{repl!.date} 從「{settings.accounts.find((a) => a.id === repl!.accountId)?.name}」支出 {repl!.amount.toLocaleString('zh-TW')} 元（傳票 {repl!.voucherNo}），列入 {monthOf(repl!.date)} 的月報。</p>}
+        {status === 'diff' && <p className="warn">已撥補 {repl!.amount.toLocaleString('zh-TW')} 元，但目前使用總額為 {total.toLocaleString('zh-TW')} 元，請按「更新撥補」。</p>}
+        {status === 'ok' && changed && !replClosed && <p className="hint">已改了列入月報、撥補日期或帳戶，按「更新撥補」後才會生效。</p>}
         {status === 'none' && <p className="warn">本月尚未撥補。</p>}
       </Section>
     </>

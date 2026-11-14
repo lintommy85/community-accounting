@@ -2,7 +2,7 @@ import { allocateAll, dueFor } from './allocation';
 import { addMonths, monthEnd } from './dates';
 import { BILL_DEPOSIT, BILL_FINE, billItemName, DueRow, normUnit, PREPAID_BEFORE_ITEM, PRIOR_ITEM, splitAmount } from './dues';
 import { activeUnits, cycleMonths, feeItemNames, isCycleStart, mainItemName, mainItemNames, setUnitItemBaseline, unitBaselines } from './fees';
-import { AppData, Due, Settings, Unit } from './types';
+import { AppData, ChargeKind, Due, Settings, Unit } from './types';
 
 /** 帳單項目對應：帳單內含逾期（例如「10月未繳管理費」「前期未繳」），不列為應繳，與系統欠款比對。 */
 export const BILL_ARREARS = '__arrears__';
@@ -51,6 +51,35 @@ export function suggestBillItem(name: string, feeItems: string[]): string {
   if (/減免|折讓|減收|退/.test(name)) return BILL_ASIS;
   const loose = (s: string) => s.replace(/位|費|清潔/g, '');
   return feeItems.find((f) => loose(f) && loose(f) === loose(name)) ?? '';
+}
+
+/** 入帳報表繳款的類型：管理費，或不銷管理費、記在帳卡的罰款與裝潢保證金。 */
+export type PaymentKind = 'fee' | ChargeKind;
+
+export const PAYMENT_KIND_LABEL: Record<PaymentKind, string> = { fee: '管理費', deposit: '裝潢保證金', fine: '罰款' };
+
+/** 入帳報表繳費項目的類型：帳單項目對應記過的優先，否則依名稱判斷（保證金、罰款），其餘是管理費。 */
+export function paymentKindOf(item: string, map: Record<string, string> | undefined): PaymentKind {
+  const name = billItemName(item || '');
+  const t = map?.[name] || suggestBillItem(name, []);
+  return t === BILL_DEPOSIT ? 'deposit' : t === BILL_FINE ? 'fine' : 'fee';
+}
+
+/** 匯入入帳報表時要選類型的繳費項目：名稱不是管理費，或判斷為罰款、裝潢保證金。 */
+export function needsPaymentKind(item: string, map: Record<string, string> | undefined): boolean {
+  const name = billItemName(item || '');
+  return !!name && (!/管理費/.test(name) || paymentKindOf(item, map) !== 'fee');
+}
+
+/** 把入帳報表選的類型記進帳單項目對應：罰款、裝潢保證金記下來；改選管理費的刪除原本的罰款或保證金對應。 */
+export function applyPaymentKinds(map: Record<string, string> | undefined, kinds: Record<string, PaymentKind>): Record<string, string> {
+  const out = { ...(map ?? {}) };
+  for (const [name, kind] of Object.entries(kinds)) {
+    if (kind === 'deposit') out[name] = BILL_DEPOSIT;
+    else if (kind === 'fine') out[name] = BILL_FINE;
+    else if (isChargeTarget(out[name])) delete out[name];
+  }
+  return out;
 }
 
 /** 帳單項目目前對應到哪裡：已儲存的對應優先；否則名稱和繳費項目相同時自動對應，名稱是逾期類的直接對應到「逾期」。 */

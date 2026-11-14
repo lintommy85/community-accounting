@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { billingStart, unitNosFromPayments } from '../lib/allocation';
+import { billingStart, firstBillMonth, unitNosFromPayments } from '../lib/allocation';
 import { newId } from '../lib/defaults';
 import { useStore } from '../store';
 
@@ -8,7 +8,9 @@ export default function HouseholdSetup({ onDone }: { onDone?: () => void }) {
   const { data, update } = useStore();
   const s = data.settings;
   const [total, setTotal] = useState(String(s.totalUnits || ''));
-  const [start, setStart] = useState(s.billingStartMonth || billingStart(data));
+  // 預設用第一個匯入帳單的月份；帳單拆出的前期欠款和更早的繳款不算（否則會被帶到上個月）
+  const firstBill = firstBillMonth(data.dues);
+  const [start, setStart] = useState(s.billingStartMonth || firstBill || billingStart(data));
   const [importUnits, setImportUnits] = useState(true);
   const [msg, setMsg] = useState('');
   const found = unitNosFromPayments(data.payments, s.units);
@@ -47,8 +49,13 @@ export default function HouseholdSetup({ onDone }: { onDone?: () => void }) {
           從繳費紀錄帶入 {found.length} 個尚未建立的戶別（基準請到「戶別與月費 → 基準與費率」設定，或匯入每月應繳報表時選「更新基準」）
         </label>
       )}
+      {firstBill && start < firstBill && (
+        <p className="banner warn">
+          第一個匯入的每月應繳是 {firstBill}，起始月份設得比它早，那些月份沒有應繳；期別在 {firstBill} 以前的繳款仍當成起始月前的帳單，不銷帳。建議設為 {firstBill}。
+        </p>
+      )}
       <p className="hint">
-        銷帳起始月份之前的月份不計應繳（例如開始使用本系統的月份）。總戶數用來檢查戶別是否都已建立；
+        銷帳起始月份之前的月份不計應繳（例如開始使用本系統的月份，通常是第一個匯入的每月應繳月份）。總戶數用來檢查戶別是否都已建立；
         戶別由「匯入智生活報表 → 每月應繳報表」匯入智生活管理費匯入範本建立（匯入時可勾選要排除的戶別）；入帳報表裡有尚未建立的戶別時，這裡會出現「從繳費紀錄帶入」。
       </p>
       <div className="form-row">

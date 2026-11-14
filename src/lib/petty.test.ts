@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { emptyData } from './defaults';
 import { monthReport } from './ledger';
-import { PETTY_CATEGORY, pettyTotal, replenishmentOf, upsertReplenishment } from './petty';
+import { defaultReplenishDate, PETTY_CATEGORY, pettyTotal, replenishmentOf, replenishReportMonths, upsertReplenishment } from './petty';
+import { monthSheet } from './statement';
 
 describe('petty cash', () => {
   it('keeps petty cash items out of the income statement and replenishes the monthly total as one expense', () => {
@@ -14,16 +15,51 @@ describe('petty cash', () => {
     expect(pettyTotal(d.pettyCash, '2026-10')).toBe(475);
     expect(monthReport(d, '2026-10').expense).toEqual([]);
 
-    d.entries = upsertReplenishment(d.entries, '2026-10', { accountId: 'acc_main', amount: 475, voucherNo: '115-0001' });
+    d.entries = upsertReplenishment(d.entries, '2026-10', { date: '2026-10-31', accountId: 'acc_main', amount: 475, voucherNo: '115-0001' });
     expect(d.entries).toHaveLength(1);
     expect(d.entries[0]).toMatchObject({ date: '2026-10-31', category: PETTY_CATEGORY, amount: 475, pettyMonth: '2026-10', accountId: 'acc_main' });
     expect(monthReport(d, '2026-10').expense).toEqual([{ category: PETTY_CATEGORY, amount: 475 }]);
 
     // 補登零用金後更新撥補：同一筆，金額變動
     d.pettyCash.push({ id: '4', date: '2026-10-30', item: '雜支', amount: 25, payee: '', note: '' });
-    d.entries = upsertReplenishment(d.entries, '2026-10', { accountId: 'acc_main', amount: pettyTotal(d.pettyCash, '2026-10'), voucherNo: 'x' });
+    d.entries = upsertReplenishment(d.entries, '2026-10', { date: '2026-10-31', accountId: 'acc_main', amount: pettyTotal(d.pettyCash, '2026-10'), voucherNo: 'x' });
     expect(d.entries).toHaveLength(1);
     expect(replenishmentOf(d.entries, '2026-10')).toMatchObject({ amount: 500, voucherNo: '115-0001' });
+  });
+
+  it('lists the replenishment on the next month report by default and can move it back to the same month', () => {
+    expect(replenishReportMonths('2026-11')).toEqual(['2026-12', '2026-11']);
+    expect(replenishReportMonths('2026-12')).toEqual(['2027-01', '2026-12']);
+    expect(defaultReplenishDate('2026-11', '2026-12', '2026-11-14')).toBe('2026-12-01');
+    expect(defaultReplenishDate('2026-11', '2026-12', '2026-12-05')).toBe('2026-12-05');
+    expect(defaultReplenishDate('2026-11', '2026-11', '2026-12-05')).toBe('2026-11-30');
+
+    const d = emptyData();
+    d.pettyCash = [
+      { id: '1', date: '2026-11-03', item: '文具', amount: 350, payee: '', note: '' },
+      { id: '2', date: '2026-11-20', item: '郵資', amount: 125, payee: '', note: '' },
+    ];
+    const total = pettyTotal(d.pettyCash, '2026-11');
+    d.entries = upsertReplenishment(d.entries, '2026-11', { date: '2026-12-01', accountId: 'acc_main', amount: total, voucherNo: '115-0001' });
+    expect(monthReport(d, '2026-11').expense).toEqual([]);
+    expect(monthReport(d, '2026-12').expense).toEqual([{ category: PETTY_CATEGORY, amount: 475 }]);
+    expect(monthSheet(d, '2026-11').expense).toEqual([]);
+    expect(monthSheet(d, '2026-12').expense.map((l) => [l.subject, l.item, l.amount])).toEqual([[PETTY_CATEGORY, '2026-11 零用金使用總額', 475]]);
+
+    d.entries = upsertReplenishment(d.entries, '2026-11', { date: '2026-11-30', accountId: 'acc_main', amount: total, voucherNo: '115-0002' });
+    expect(d.entries).toHaveLength(1);
+    expect(d.entries[0]).toMatchObject({ date: '2026-11-30', pettyMonth: '2026-11', voucherNo: '115-0001' });
+    expect(monthReport(d, '2026-11').expense).toEqual([{ category: PETTY_CATEGORY, amount: 475 }]);
+    expect(monthReport(d, '2026-12').expense).toEqual([]);
+  });
+
+  it('takes a voucher number of the new year when the replenishment moves into another year', () => {
+    let entries = upsertReplenishment([], '2026-12', { date: '2026-12-31', accountId: 'acc_main', amount: 100, voucherNo: '115-0009' });
+    entries = upsertReplenishment(entries, '2026-12', { date: '2027-01-04', accountId: 'acc_main', amount: 100, voucherNo: '116-0001' });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ date: '2027-01-04', pettyMonth: '2026-12', voucherNo: '116-0001' });
+    entries = upsertReplenishment(entries, '2026-12', { date: '2027-01-06', accountId: 'acc_main', amount: 120, voucherNo: '116-0002' });
+    expect(entries[0]).toMatchObject({ date: '2027-01-06', amount: 120, voucherNo: '116-0001' });
   });
 });
 

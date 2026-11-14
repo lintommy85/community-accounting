@@ -6,6 +6,8 @@ import BillImport from '../components/BillImport';
 import ImportReview, { ReviewDecision } from '../components/ImportReview';
 import { Go, useNavArg } from '../components/nav';
 import { allocateAll, AmountCheck, findAmountMismatches, normUnit } from '../lib/allocation';
+import { applyPaymentKinds, billItemName, needsPaymentKind, PAYMENT_KIND_LABEL, PaymentKind, paymentKindOf } from '../lib/bills';
+import { renovationSettings } from '../lib/renovation';
 import { unitBaseline } from '../lib/fees';
 import { MergeResult, mergeRows, RowStatus } from '../lib/ledger';
 import { extractRows, gridToTable, guessMapping, missingRequired, detectHeaderRow, sheetMeta } from '../lib/parser';
@@ -32,6 +34,7 @@ export default function ImportPage({ go }: { go: Go }) {
   const navArg = useNavArg();
   const [tab, setTab] = useState<'deposit' | 'dues'>(navArg === 'dues' ? 'dues' : 'deposit');
   const [review, setReview] = useState<{ batchId: string; result: MergeResult; checks: AmountCheck[]; dryData: AppData } | null>(null);
+  const [kindPicks, setKindPicks] = useState<Record<string, PaymentKind>>({});
 
   const sheet = sheets[sheetIdx];
   const table = useMemo(() => (sheet ? gridToTable(sheet.sheetName, sheet.grid, headerRow) : null), [sheet, headerRow]);
@@ -47,10 +50,24 @@ export default function ImportPage({ go }: { go: Go }) {
       : undefined;
     const closedRows = rows.filter((r) => isClosed(r.paidDate));
     const openRows = rows.filter((r) => !isClosed(r.paidDate));
+    // 不是管理費的繳費項目（例如「115年度裝潢保證金」）：選擇類型，罰款、保證金不銷管理費，選過的記在帳單項目對應
+    const savedMap = data.settings.billItemMap;
+    const kindItems: { name: string; example: string; count: number; amount: number; kind: PaymentKind }[] = [];
+    for (const r of openRows) {
+      if (!needsPaymentKind(r.item, savedMap)) continue;
+      const name = billItemName(r.item);
+      let k = kindItems.find((x) => x.name === name);
+      if (!k) kindItems.push((k = { name, example: r.item, count: 0, amount: 0, kind: kindPicks[name] ?? paymentKindOf(r.item, savedMap) }));
+      k.count++;
+      k.amount += r.amount;
+    }
+    const kinds = Object.fromEntries(kindItems.map((k) => [k.name, k.kind])) as Record<string, PaymentKind>;
+    const settings = { ...data.settings, billItemMap: applyPaymentKinds(savedMap, kinds) };
+    const base: AppData = { ...data, settings };
     const dry = mergeRows(data.payments, openRows, 'preview', skip);
-    const mismatches = findAmountMismatches({ ...data, payments: dry.payments }, new Set(dry.payments.filter((p) => p.batchId === 'preview').map((p) => p.id))).length;
+    const mismatches = findAmountMismatches({ ...base, payments: dry.payments }, new Set(dry.payments.filter((p) => p.batchId === 'preview').map((p) => p.id))).length;
     // 可能重複：同戶、同期別已有相同金額的繳費（收據單號不同），而且加起來超過這期帳單；分幾筆繳、合計沒超過的不算
-    const alloc = allocateAll(data);
+    const alloc = allocateAll(base);
     const billOf = (unitNo: string, period: string) => {
       const acc = alloc.byKey.get(normUnit(unitNo));
       const months = parsePeriods(period);
@@ -66,6 +83,7 @@ export default function ImportPage({ go }: { go: Go }) {
     for (const r of openRows) {
       const st = dry.status.get(r.rowNumber);
       if (st !== 'added' && st !== 'skipped') continue;
+      if (kinds[billItemName(r.item)] && kinds[billItemName(r.item)] !== 'fee') continue;
       const group = `${normUnit(r.unitNo)}|${r.billPeriod}`;
       const k = `${group}|${r.amount}`;
       const total = (sums.get(group) ?? 0) + r.amount;
@@ -75,10 +93,21 @@ export default function ImportPage({ go }: { go: Go }) {
       sums.set(group, total);
     }
     const months = Array.from(new Set(rows.map((r) => monthOf(r.paidDate)))).sort();
-    // 繳的是帳務起始月前的帳單（那些月份沒有應繳）：不銷帳，也不列預收或暫收
-    const dryAlloc = allocateAll({ ...data, payments: dry.payments });
-    const before = dry.payments.filter((p) => p.batchId === 'preview' && dryAlloc.byKey.get(normUnit(p.unitNo))?.beforeStart.has(p.id));
-    const beforeStart = { count: before.length, amount: before.reduce((t, p) => t + p.amount, 0) };
+    // 繳的是系統開始記帳前的帳單（那些月份沒有應繳）：不銷帳，也不列預收或暫收
+    const dryAlloc = allocateAll({ ...base, payments: dry.payments });
+    const fresh = dry.payments.filter((p) => p.batchId === 'preview');
+    const before = fresh.filter((p) => dryAlloc.byKey.get(normUnit(p.unitNo))?.beforeStart.has(p.id));
+    const beforeStart = { count: before.length, amount: before.reduce((t, p) => t + p.amount, 0), month: dryAlloc.preStartBefore };
+    // 期別的每月應繳還沒匯入：先列暫收款，等帳單匯入再銷
+    const waiting = fresh.filter((p) => {
+      const acc = dryAlloc.byKey.get(normUnit(p.unitNo));
+      return !!acc && acc.pendingCredit.has(p.id) && !(dryAlloc.byPayment.get(p.id)?.length) && parsePeriods(p.billPeriod).length > 0;
+    });
+    const held = { count: waiting.length, amount: waiting.reduce((t, p) => t + p.amount, 0), months: Array.from(new Set(waiting.flatMap((p) => parsePeriods(p.billPeriod)))).sort() };
+    const charge = (kind: PaymentKind) => {
+      const list = fresh.filter((p) => kinds[billItemName(p.item)] === kind);
+      return { count: list.length, amount: list.reduce((t, p) => t + p.amount, 0) };
+    };
     return {
       rows,
       openRows,
@@ -90,12 +119,18 @@ export default function ImportPage({ go }: { go: Go }) {
       net,
       mismatches,
       beforeStart,
+      held,
+      kindItems,
+      kinds,
+      settings,
+      deposits: charge('deposit'),
+      fines: charge('fine'),
       maybeDup,
       meta,
       payoutAccount,
       withDepositDate: rows.filter((r) => r.reportDepositDate).length,
     };
-  }, [table, sheet, headerRow, mapping, data.payments, data.settings, isClosed, skip]);
+  }, [table, sheet, headerRow, mapping, data, isClosed, skip, kindPicks]);
 
   async function onFile(file: File | undefined) {
     if (!file) return;
@@ -109,6 +144,7 @@ export default function ImportPage({ go }: { go: Go }) {
       const t = gridToTable(wb[best].sheetName, wb[best].grid, hr);
       setFileName(file.name);
       setSkip(new Set());
+      setKindPicks({});
       setRowFilter('all');
       setRowQ('');
       setSheets(wb);
@@ -138,7 +174,7 @@ export default function ImportPage({ go }: { go: Go }) {
     const batchId = newId('b_');
     const result = mergeRows(data.payments, preview.openRows, batchId, skip);
     const newIds = new Set(result.payments.filter((p) => p.batchId === batchId).map((p) => p.id));
-    const dryData = { ...data, payments: result.payments };
+    const dryData = { ...data, settings: preview.settings, payments: result.payments };
     const checks = findAmountMismatches(dryData, newIds);
     if (checks.length) return setReview({ batchId, result, checks, dryData });
     commit(batchId, result, new Map());
@@ -156,11 +192,12 @@ export default function ImportPage({ go }: { go: Go }) {
       };
     });
     const manual = Array.from(decisions.values()).filter((d) => d.allocations).length;
+    const kindText = preview.kindItems.filter((k) => k.kind !== 'fee').map((k) => `${k.example}→${PAYMENT_KIND_LABEL[k.kind]}`).join('、');
     update(
       (d) => ({
         ...d,
         payments,
-        settings: remember ? { ...d.settings, mapping } : d.settings,
+        settings: { ...d.settings, ...(remember ? { mapping } : {}), billItemMap: applyPaymentKinds(d.settings.billItemMap, preview.kinds) },
         batches: [
           ...d.batches,
           {
@@ -176,7 +213,7 @@ export default function ImportPage({ go }: { go: Go }) {
         ],
       }),
       '匯入報表',
-      `${fileName}：新增 ${result.added}、重複 ${result.duplicates}、更新 ${result.updated}${skip.size ? `、選擇不新增 ${skip.size}` : ''}${decisions.size ? `、金額確認 ${decisions.size}（手動銷帳 ${manual}）` : ''}`,
+      `${fileName}：新增 ${result.added}、重複 ${result.duplicates}、更新 ${result.updated}${skip.size ? `、選擇不新增 ${skip.size}` : ''}${decisions.size ? `、金額確認 ${decisions.size}（手動銷帳 ${manual}）` : ''}${kindText ? `；類型 ${kindText}` : ''}`,
     );
     setDone(
       `匯入完成：新增 ${result.added} 筆，重複略過 ${result.duplicates} 筆，更新 ${result.updated} 筆（入帳日或金額有變動）` +
@@ -284,11 +321,23 @@ export default function ImportPage({ go }: { go: Go }) {
                 </li>
                 {preview.maybeDup.size > 0 && <li className="warn">{preview.maybeDup.size} 筆可能重複：同一戶、同期別已經有相同金額的繳費（收據單號不同），而且合計超過這期帳單。請在下表確認，重複的取消勾選「新增」；確實多繳的保留，會列入這戶的預收款。</li>}
                 <li>{preview.withDepositDate === preview.rows.length ? '全部都有入帳日' : `${preview.rows.length - preview.withDepositDate} 筆沒有入帳日，視為尚未入帳（在途存款）`}</li>
+                {(preview.deposits.count > 0 || preview.fines.count > 0) && (
+                  <li>
+                    {[preview.deposits.count ? `${preview.deposits.count} 筆是裝潢保證金（${preview.deposits.amount.toLocaleString('zh-TW')} 元）` : '', preview.fines.count ? `${preview.fines.count} 筆是罰款（${preview.fines.amount.toLocaleString('zh-TW')} 元）` : ''].filter(Boolean).join('、')}
+                    {`：不銷管理費，記在那戶的帳卡；收支報表列${[preview.deposits.count ? `「${renovationSettings(data.settings).depositLabel}」` : '', preview.fines.count ? '「罰款收入」' : ''].join('')}，不算管理費收入。`}
+                  </li>
+                )}
                 {preview.beforeStart.count > 0 && (
                   <li>
-                    {preview.beforeStart.count} 筆（<Money value={preview.beforeStart.amount} /> 元）繳的是帳務起始月（{data.settings.billingStartMonth || '自動'}）之前的帳單，
-                    這些月份沒有應繳，所以不銷帳，也不列預收或暫收；收入照樣列入繳費當月的「補繳以前月份」。
-                    要從更早的月份開始記帳，請先匯入那個月的每月應繳報表（帳務起始月會自動往前改）。
+                    {preview.beforeStart.count} 筆（<Money value={preview.beforeStart.amount} /> 元）繳的是系統開始記帳（{preview.beforeStart.month}）以前的帳單，
+                    這些月份沒有應繳，所以不銷帳，也不列預收或暫收；收入照樣列入繳費當月（當月繳當月的帳單算當期，期別較早的算「補繳以前月份」）。
+                    要從更早的月份開始記帳，請先匯入那個月的每月應繳報表。
+                  </li>
+                )}
+                {preview.held.count > 0 && (
+                  <li>
+                    {preview.held.count} 筆（<Money value={preview.held.amount} /> 元）期別 {preview.held.months.join('、')} 的每月應繳還沒匯入，先列暫收款；
+                    匯入那個月的每月應繳報表後，會自動銷到期別的月份，不會拿去銷其他月份。
                   </li>
                 )}
                 {preview.mismatches > 0 && <li className="warn">{preview.mismatches} 筆繳費金額與帳單金額不同（多繳或少繳），按「確認匯入」後會逐筆請你確認要銷哪幾個月</li>}
@@ -301,6 +350,32 @@ export default function ImportPage({ go }: { go: Go }) {
                   </li>
                 )}
               </ul>
+              {preview.kindItems.length > 0 && (
+                <section className="banner block">
+                  <strong>這份報表有 {preview.kindItems.length} 個不是管理費的繳費項目，請確認類型</strong>
+                  <span>
+                    裝潢保證金、罰款不銷管理費，只記在那戶的帳卡；裝潢保證金之後到「日常記帳 → 裝潢保證金」結算退款。
+                    名稱有「保證金」「罰款」的會自動帶入，選擇會記在「基本設定 → 帳單項目對應」，下次匯入自動套用。
+                  </span>
+                  <table className="compact-inputs">
+                    <thead><tr><th>繳費項目（期別名稱）</th><th className="num">筆數</th><th className="num">合計金額</th><th>類型</th></tr></thead>
+                    <tbody>
+                      {preview.kindItems.map((k) => (
+                        <tr key={k.name}>
+                          <td>{k.example}</td>
+                          <td className="num">{k.count}</td>
+                          <td className="num"><Money value={k.amount} /></td>
+                          <td>
+                            <select aria-label={`${k.example} 的類型`} value={k.kind} onChange={(e) => setKindPicks({ ...kindPicks, [k.name]: e.target.value as PaymentKind })}>
+                              {(Object.keys(PAYMENT_KIND_LABEL) as PaymentKind[]).map((x) => <option key={x} value={x}>{PAYMENT_KIND_LABEL[x]}</option>)}
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+              )}
               <p className="hint">
                 逐筆確認：預設新增所有還沒匯入的款項；不要新增的取消勾選「新增」（例如重複上傳、或智生活重複列出的同一筆）。
                 已匯入過的款項（同一張收據單號）不會再新增。同一戶分好幾筆繳的，會全部新增並依序銷帳，超過應繳的部分列入這戶的預收款。
@@ -351,7 +426,8 @@ export default function ImportPage({ go }: { go: Go }) {
                               <span className={`tag ${st === 'added' ? 'ok' : st === 'updated' ? 'warn' : ''}`}>{ROW_STATUS[st ?? 'duplicate']}</span>
                               {maybe && <span className="tag warn" title="同一戶、同期別已經有相同金額的繳費，而且合計超過這期帳單">可能重複</span>}
                             </td>
-                            <td>{r.rowNumber}</td><td>{r.unitNo}</td><td>{r.payerName}</td><td>{r.billPeriod}</td><td>{r.item}</td>
+                            <td>{r.rowNumber}</td><td>{r.unitNo}</td><td>{r.payerName}</td><td>{r.billPeriod}</td>
+                            <td>{r.item}{preview.kinds[billItemName(r.item)] && preview.kinds[billItemName(r.item)] !== 'fee' && <span className="tag purple">{PAYMENT_KIND_LABEL[preview.kinds[billItemName(r.item)]]}</span>}</td>
                             <td>{r.paidDate}</td><td>{r.channel}</td>
                             <td className="num"><Money value={r.amount} /></td><td className="num">{r.fee ? <Money value={r.fee} /> : ''}</td><td className="num"><Money value={r.depositAmount ?? r.amount - r.fee} /></td>
                             <td>{r.reportDepositDate || <span className="tag warn">尚未入帳</span>}</td>

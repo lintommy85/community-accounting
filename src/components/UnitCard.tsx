@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BEFORE_START_TEXT, cardMonths, chargeAmounts, chargeText, dueFor, isOpeningPayment, summarizeUnit, UnitAccount, unitChargeRows } from '../lib/allocation';
+import { BEFORE_START_TEXT, cardMonths, chargeAmounts, chargeKindOfItem, chargeText, dueFor, isOpeningPayment, summarizeUnit, UnitAccount, unitChargeRows } from '../lib/allocation';
 import { withCommunity } from '../lib/defaults';
 import { ownerAt, ownerHistory } from '../lib/owners';
 import { Payment } from '../lib/types';
@@ -82,6 +82,7 @@ export default function UnitCard({ account, startMonth, onBack }: { account: Uni
               const allocated = allocatedOf(p.id);
               const opening = isOpeningPayment(p.id);
               const before = account.beforeStart.has(p.id);
+              const kind = opening ? undefined : chargeKindOfItem(p.item, data.settings);
               return (
                 <tr key={p.id} className={opening ? 'sub-line' : ''}>
                   <td>{p.paidDate}</td><td>{p.channel}</td><td>{p.billPeriod}</td>
@@ -89,11 +90,17 @@ export default function UnitCard({ account, startMonth, onBack }: { account: Uni
                   <td className="num"><Money value={allocated} /></td>
                   <td className="num">{!before && p.amount - allocated - chargeOf(p.id) ? <Money value={p.amount - allocated - chargeOf(p.id)} /> : ''}</td>
                   <td>
-                    {opening ? <span className="tag ok">期初預收款</span> : before ? <span className="tag" title="期別在帳務起始月之前，這些月份沒有應繳，不銷帳、不列預收或暫收">{BEFORE_START_TEXT}</span> : p.allocations ? <span className="tag warn">手動</span> : p.billPeriod ? <span className="tag">依期別</span> : <span className="tag">自動（先銷舊欠）</span>}
-                    {chargeOf(p.id) > 0 && <span className="tag purple">{chargeText(chargeAmounts(account, p.id))}</span>}
+                    {kind ? (
+                      <span className="tag purple" title="罰款、裝潢保證金只記在帳卡，不銷管理費">{kind === 'deposit' ? '裝潢保證金' : '罰款'}，不銷管理費</span>
+                    ) : (
+                      <>
+                        {opening ? <span className="tag ok">期初預收款</span> : before ? <span className="tag" title="期別在帳務起始月之前，這些月份沒有應繳，不銷帳、不列預收或暫收">{BEFORE_START_TEXT}</span> : p.allocations ? <span className="tag warn">手動</span> : p.billPeriod ? <span className="tag">依期別</span> : <span className="tag">自動（先銷舊欠）</span>}
+                        {chargeOf(p.id) > 0 && <span className="tag purple">{chargeText(chargeAmounts(account, p.id))}</span>}
+                      </>
+                    )}
                   </td>
                   <td className="note-cell" title={p.note}>{p.note}</td>
-                  <td className="no-print">{!opening && <button className="link" onClick={() => setEditing(p)}>調整銷帳</button>}</td>
+                  <td className="no-print">{!opening && !kind && <button className="link" onClick={() => setEditing(p)}>調整銷帳</button>}</td>
                 </tr>
               );
             })}

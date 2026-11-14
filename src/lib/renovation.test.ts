@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allocateAll, findAmountMismatches, summarizeUnit, unitChargeRows } from './allocation';
+import { allocateAll, findAmountMismatches, monthWriteOff, paidListForMonth, summarizeUnit, unitChargeRows } from './allocation';
 import { BILL_DEPOSIT, BILL_FINE, planBillImport, suggestBillItem } from './bills';
 import { emptyData } from './defaults';
 import { applyDueChanges, diffDues, DueRow } from './dues';
@@ -58,6 +58,35 @@ describe('罰款與裝潢保證金的帳單項目', () => {
     expect(unitChargeRows(a, d.entries)).toEqual([{ month: '2026-11', kind: 'fine', item: '罰款', billed: 500, paid: 500, dates: ['2026-11-05'] }]);
   });
 
+  it('does not count a deposit paid on its own as this month’s management fee when checking amounts', () => {
+    const d = setup();
+    // A 戶另外繳了裝潢保證金（帳單上沒有保證金，只有罰款）：之後匯入 11 月管理費，不應該跳出金額不同
+    const deposit = pay('a0', 'A', '2026-11-13', 36000, '115年度裝潢保證金', '115年度裝潢保證金');
+    d.settings.billItemMap = { ...d.settings.billItemMap, 裝潢保證金: BILL_DEPOSIT };
+    d.payments = [deposit, pay('a1', 'A', '2026-11-10', 2500, '115年11月管理費')];
+    expect(findAmountMismatches(d, new Set(['a1']))).toEqual([]);
+    const a = allocateAll(d).byKey.get('A')!;
+    expect([a.paidByMonth.get('2026-11'), a.credit]).toEqual([2000, 0]);
+    expect(a.chargePaid.map((c) => [c.paymentId, c.kind, c.amount])).toEqual([['a1', 'fine', 500], ['a0', 'deposit', 36000]]);
+    // 只繳管理費、沒繳罰款：照樣提醒少繳，保證金不會拿來抵
+    d.payments = [deposit, pay('a1', 'A', '2026-11-10', 2000, '115年11月管理費')];
+    expect(findAmountMismatches(d, new Set(['a1'])).map((c) => [c.expected, c.diff, c.others.count, c.others.amount])).toEqual([[2500, -500, 0, 0]]);
+  });
+
+  it('keeps a deposit-type payment out of the management fee even if it carries an old manual write-off', () => {
+    const d = setup();
+    d.payments = [{ ...pay('a0', 'A', '2026-11-13', 36000, '115年度裝潢保證金', '115年度裝潢保證金'), allocations: [{ month: '2026-11', amount: 2000 }] }];
+    const a = allocateAll(d).byKey.get('A')!;
+    expect([a.allocations.length, a.paidByMonth.get('2026-11') ?? 0, a.credit]).toEqual([0, 0, 0]);
+    expect(a.chargePaid.map((c) => [c.kind, c.amount])).toEqual([['deposit', 36000]]);
+  });
+
+  it('still counts a separately paid deposit against the deposit on the same bill', () => {
+    const d = setup();
+    d.payments = [pay('b0', 'B', '2026-11-03', 10000, '115年11月裝潢保證金', '裝潢保證金'), pay('b1', 'B', '2026-11-06', 2000, '115年11月管理費')];
+    expect(findAmountMismatches(d, new Set(['b1']))).toEqual([]);
+  });
+
   it('leaves the fine unpaid when the payment only covers the dues', () => {
     const d = setup();
     d.payments = [pay('a1', 'A', '2026-11-05', 2000, '115年11月管理費')];
@@ -71,6 +100,15 @@ describe('罰款與裝潢保證金的帳單項目', () => {
     d.payments = [pay('x', 'A', '2026-11-08', 6000, '', '裝潢保證金')];
     const r = allocateAll(d);
     expect([r.byKey.get('A')!.paidByMonth.get('2026-11') ?? 0, r.chargesByPayment.get('x')]).toEqual([0, { fine: 0, deposit: 6000 }]);
+  });
+
+  it('leaves fines and deposits out of the management fee write-off and its paid list', () => {
+    const d = setup();
+    d.payments = [pay('a1', 'A', '2026-11-05', 2500, '115年11月管理費'), pay('b1', 'B', '2026-11-06', 2000, '115年11月管理費'), pay('x', 'A', '2026-11-08', 6000, '', '裝潢保證金')];
+    const r = allocateAll(d);
+    expect(paidListForMonth(r, d.payments, '2026-11').map((l) => [l.payment.id, l.fee])).toEqual([['a1', 2000], ['b1', 2000]]);
+    const w = monthWriteOff(r, d.payments, '2026-11');
+    expect([w.received, w.fromCurrent, w.total]).toEqual([4000, 4000, 4000]);
   });
 
   it('reports fines and deposits as their own income lines, not management fee income', () => {

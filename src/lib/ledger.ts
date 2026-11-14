@@ -1,6 +1,6 @@
 import { addMonths, monthEnd, monthOf, parsePeriods } from './dates';
 import { ParsedRow } from './parser';
-import { allocateAll, monthWriteOff, normUnit, MonthWriteOff, PaidLine, paidListForMonth, unpaidByMonth, UnpaidLine, advancesFromAllocations, AdvanceBalances, receiptBreakdown, ReceiptBreakdown } from './allocation';
+import { allocateAll, DateBasis, dateOfBasis, monthWriteOff, normUnit, MonthWriteOff, PaidLine, paidListForMonth, unpaidByMonth, UnpaidLine, advancesFromAllocations, AdvanceBalances, receiptBreakdown, ReceiptBreakdown } from './allocation';
 import { resolveDepositAccountId } from './defaults';
 import { AppData, LedgerEntry, Payment } from './types';
 
@@ -281,6 +281,8 @@ export interface MonthReport {
   prepaid: number;
   suspense: number;
   receipt: ReceiptBreakdown | null;
+  /** 管理費銷帳的本月繳款與已繳清單依繳費日或入帳日列入月份。 */
+  basis: DateBasis;
   writeOff: MonthWriteOff | null;
   paidList: PaidLine[];
   unpaidList: UnpaidLine[];
@@ -290,7 +292,7 @@ export interface MonthReport {
   checkDiff: number;
 }
 
-export function monthReport(data: AppData, month: string): MonthReport {
+export function monthReport(data: AppData, month: string, basis: DateBasis = 'paid'): MonthReport {
   const { settings } = data;
   const ps = active(data.payments);
   const prevEnd = monthEnd(addMonths(month, -1));
@@ -333,8 +335,9 @@ export function monthReport(data: AppData, month: string): MonthReport {
     byItem: Array.from(itemMap, ([item, amount]) => ({ item, amount })),
     ...advancesFor(data, month),
     receipt: alloc ? receiptBreakdown(alloc, data.payments, start, end) : null,
-    writeOff: alloc ? monthWriteOff(alloc, data.payments, month) : null,
-    paidList: alloc ? paidListForMonth(alloc, data.payments, month) : [],
+    basis,
+    writeOff: alloc ? monthWriteOff(alloc, data.payments, month, dateOfBasis(basis)) : null,
+    paidList: alloc ? paidListForMonth(alloc, data.payments, month, dateOfBasis(basis)) : [],
     unpaidList: alloc ? unpaidByMonth(alloc, month) : [],
     income: sumBy('income'),
     expense: sumBy('expense'),

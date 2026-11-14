@@ -9,6 +9,17 @@ export function todayStr(): string {
   return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate());
 }
 
+/** 存檔的 ISO 時間（UTC）轉成本機時間 YYYY-MM-DD HH:mm（seconds 時加秒）；空白或無法解析時原樣傳回。 */
+export function localDateTime(iso: string, seconds = false): string {
+  const d = new Date(iso);
+  if (!iso || Number.isNaN(d.getTime())) return iso;
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}${seconds ? `:${pad(d.getSeconds())}` : ''}`;
+  return `${ymd(d.getFullYear(), d.getMonth() + 1, d.getDate())} ${time}`;
+}
+
+/** 存檔的 ISO 時間（UTC）轉成本機日期 YYYY-MM-DD。 */
+export const localDate = (iso: string) => localDateTime(iso).slice(0, 10);
+
 export function isValidDate(s: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   const [y, m, d] = s.split('-').map(Number);

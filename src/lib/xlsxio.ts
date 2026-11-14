@@ -1,9 +1,10 @@
 import * as XLSX from 'xlsx';
+import { localDate, localDateTime } from './dates';
 import { FIELD_LABELS, withCommunity } from './defaults';
 import { AccountRegister, netAmount, MonthReport } from './ledger';
 import { decodeText, Grid } from './parser';
 import { BREAKDOWN_LABELS, PositionSummary, signatureRows, Statement } from './statement';
-import { BEFORE_START_TEXT, chargeText, UnitSummary } from './allocation';
+import { BEFORE_START_LIST_TEXT, chargeText, UnitSummary } from './allocation';
 import { ownerHistory, ownerHistoryText } from './owners';
 import { AppData, FieldKey } from './types';
 
@@ -65,7 +66,7 @@ export function exportAllToExcel(data: AppData): Blob {
     sheet(
       [...data.dues]
         .sort((a, b) => a.month.localeCompare(b.month) || a.unitNo.localeCompare(b.unitNo, 'zh-Hant', { numeric: true }))
-        .map((d) => ({ 月份: d.month, 戶別: d.unitNo, 項目: d.item, 應繳金額: d.amount, 智生活帳單金額: d.billAmount ?? d.amount, 帳單內含逾期: Math.max(0, (d.billAmount ?? d.amount) - d.amount), 拆出自帳單: d.fromBill ?? '', 來源: d.source === 'import' ? '匯入' : '手動', 更新時間: d.updatedAt })),
+        .map((d) => ({ 月份: d.month, 戶別: d.unitNo, 項目: d.item, 應繳金額: d.amount, 智生活帳單金額: d.billAmount ?? d.amount, 帳單內含逾期: Math.max(0, (d.billAmount ?? d.amount) - d.amount), 拆出自帳單: d.fromBill ?? '', 來源: d.source === 'import' ? '匯入' : '手動', 更新時間: localDateTime(d.updatedAt, true) })),
       [10, 10, 12, 10, 12, 12, 10, 6, 22],
     ),
     '每月應繳',
@@ -94,7 +95,7 @@ export function exportAllToExcel(data: AppData): Blob {
   );
   XLSX.utils.book_append_sheet(
     wb,
-    sheet(settings.units.map((u) => ({ 戶別: u.unitNo, 所有權人: u.owner, 所有權人紀錄: ownerHistory(u).length > 1 ? ownerHistoryText(u) : '', 每月應繳基準: u.monthlyFee, 地址: u.address ?? '', 狀態: u.deletedAt ? `已排除 ${u.deletedAt.slice(0, 10)}` : '使用中', 備註: u.note }))),
+    sheet(settings.units.map((u) => ({ 戶別: u.unitNo, 所有權人: u.owner, 所有權人紀錄: ownerHistory(u).length > 1 ? ownerHistoryText(u) : '', 每月應繳基準: u.monthlyFee, 地址: u.address ?? '', 狀態: u.deletedAt ? `已排除 ${localDate(u.deletedAt)}` : '使用中', 備註: u.note }))),
     '戶別',
   );
   XLSX.utils.book_append_sheet(
@@ -115,7 +116,7 @@ export function exportAllToExcel(data: AppData): Blob {
     wb,
     sheet(
       data.batches.map((b) => ({
-        匯入時間: b.importedAt,
+        匯入時間: localDateTime(b.importedAt, true),
         檔名: b.fileName,
         工作表: b.sheetName,
         總列數: b.totalRows,
@@ -128,10 +129,10 @@ export function exportAllToExcel(data: AppData): Blob {
   );
   XLSX.utils.book_append_sheet(
     wb,
-    sheet(data.closes.map((c) => ({ 月份: c.month, 結帳時間: c.closedAt, 本月入帳: c.deposited, 月底在途: c.inTransit, 備註: c.note }))),
+    sheet(data.closes.map((c) => ({ 月份: c.month, 結帳時間: localDateTime(c.closedAt, true), 本月入帳: c.deposited, 月底在途: c.inTransit, 備註: c.note }))),
     '月結',
   );
-  XLSX.utils.book_append_sheet(wb, sheet(data.audit.map((a) => ({ 時間: a.at, 動作: a.action, 內容: a.detail }))), '操作紀錄');
+  XLSX.utils.book_append_sheet(wb, sheet(data.audit.map((a) => ({ 時間: localDateTime(a.at, true), 動作: a.action, 內容: a.detail }))), '操作紀錄');
   const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
   return new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
@@ -175,22 +176,24 @@ export function exportMonthReport(data: AppData, r: MonthReport): Blob {
   XLSX.utils.book_append_sheet(wb, ws, '月報');
   if (r.writeOff) {
     const ml = (m: string) => `${Number(m.slice(0, 4)) - 1911}/${m.slice(5)}`;
+    const byDeposit = r.basis === 'deposit';
     const paid = XLSX.utils.aoa_to_sheet([
-      [withCommunity(settings, `${r.month} 管理費繳費明細－已繳`)],
+      [withCommunity(settings, `${r.month} 管理費繳費明細－已繳（${byDeposit ? '依入帳日' : '依繳費日'}，不含罰款、裝潢保證金）`)],
       [],
-      ['戶別', '所有權人', '繳費日期', '繳費方式', '期別', '銷帳月份', '繳費金額'],
+      ['戶別', '所有權人', '繳費日期', ...(byDeposit ? ['入帳日期'] : []), '繳費方式', '期別', '銷帳月份', '管理費金額'],
       ...r.paidList.map((l) => [
         l.payment.unitNo,
         l.owner,
         l.payment.paidDate,
+        ...(byDeposit ? [l.payment.depositDate] : []),
         l.payment.channel,
         l.payment.billPeriod,
-        [...l.allocations.map((a) => `${ml(a.month)} ${a.amount}`), ...(l.credit ? [`${l.pending ? '暫收' : '預收'} ${l.credit}`] : []), ...(l.beforeStart ? [BEFORE_START_TEXT] : []), ...(chargeText(l.charges) ? [chargeText(l.charges)] : [])].join('、'),
-        l.payment.amount,
+        [...l.allocations.map((a) => `${ml(a.month)} ${a.amount}`), ...(l.credit ? [`${l.pending ? '暫收' : '預收'} ${l.credit}`] : []), ...(l.beforeStart ? [BEFORE_START_LIST_TEXT] : []), ...(chargeText(l.charges) ? [chargeText(l.charges)] : [])].join('、'),
+        l.fee,
       ]),
-      ['', '', '', '', '', '已繳合計', r.paidList.reduce((sum, l) => sum + l.payment.amount, 0)],
+      ['', '', '', ...(byDeposit ? [''] : []), '', '', '已繳合計', r.paidList.reduce((sum, l) => sum + l.fee, 0)],
     ]);
-    paid['!cols'] = [24, 12, 12, 12, 16, 36, 12].map((wch) => ({ wch }));
+    paid['!cols'] = [24, 12, 12, ...(byDeposit ? [12] : []), 12, 16, 36, 12].map((wch) => ({ wch }));
     XLSX.utils.book_append_sheet(wb, paid, '已繳');
     const unpaid = XLSX.utils.aoa_to_sheet([
       [withCommunity(settings, `截至 ${r.month} 管理費繳費明細－未繳（逐月）`)],

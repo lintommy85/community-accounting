@@ -4,7 +4,7 @@ import CommunityProfile from '../components/CommunityProfile';
 import { lastMonth, Section, Stat, thisMonth } from '../components/ui';
 import { advancesFromAllocations, allocateAll } from '../lib/allocation';
 import { openDepositSummary } from '../lib/renovation';
-import { todayStr } from '../lib/dates';
+import { localDate, todayStr } from '../lib/dates';
 import { resolveDepositAccountId } from '../lib/defaults';
 import { activeUnits, unitBaseline } from '../lib/fees';
 import { accountBalances, depositGroups, monthReport } from '../lib/ledger';
@@ -94,7 +94,7 @@ export default function Dashboard({ go }: { go: Go }) {
             <tr><th>繳費紀錄</th><td>{data.payments.length} 筆</td></tr>
             <tr><th>收支分錄</th><td>{data.entries.length} 筆</td></tr>
             <tr><th>戶別</th><td>{units.length} 戶{data.settings.units.length > units.length ? `（另有 ${data.settings.units.length - units.length} 戶已排除）` : ''}</td></tr>
-            <tr><th>最近匯入</th><td>{lastImport ? `${lastImport.fileName}（${lastImport.importedAt.slice(0, 10)}，新增 ${lastImport.added} 筆）` : '尚未匯入'}</td></tr>
+            <tr><th>最近匯入</th><td>{lastImport ? `${lastImport.fileName}（${localDate(lastImport.importedAt)}，新增 ${lastImport.added} 筆）` : '尚未匯入'}</td></tr>
             <tr><th>已月結月份</th><td>{data.closes.map((c) => c.month).sort().join('、') || '無'}</td></tr>
           </tbody>
         </table>

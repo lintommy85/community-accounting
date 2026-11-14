@@ -1,7 +1,10 @@
+import { PrepaidTotals } from '../lib/allocation';
 import { appTitle, formatMoney } from '../lib/defaults';
+import { ReceivableRollForward } from '../lib/receivable';
 import { MonthReport } from '../lib/ledger';
 import { monthSheet, rocYear, SheetLine } from '../lib/statement';
 import { AppData } from '../lib/types';
+import { PrepaidBlock, ReceivableBlock } from './ReportBlocks';
 import Signatures from './Signatures';
 
 const dollars = (n: number) => `$${formatMoney(n)}`;
@@ -34,8 +37,8 @@ function Rows({ income, expense }: { income: SheetLine[]; expense: SheetLine[] }
   );
 }
 
-/** 列印用的彩色「財務收支總表」（仿智生活格式）：收入與支出左右並排，分固定／非固定，接帳戶匯總與簽章。 */
-export default function FinanceSheet({ data, month, report }: { data: AppData; month: string; report: MonthReport }) {
+/** 列印用的彩色「財務收支總表」（仿智生活格式）：收入與支出左右並排，分固定／非固定，接帳戶匯總、預收款項變動、應收（未繳）管理費變動與簽章。 */
+export default function FinanceSheet({ data, month, report, prepaid, receivable }: { data: AppData; month: string; report: MonthReport; prepaid?: PrepaidTotals | null; receivable?: ReceivableRollForward | null }) {
   const s = data.settings;
   const sheet = monthSheet(data, month);
   const fixedIn = sheet.income.filter((l) => l.fixed);
@@ -135,6 +138,9 @@ export default function FinanceSheet({ data, month, report }: { data: AppData; m
           )}
         </tbody>
       </table>
+
+      {prepaid && <PrepaidBlock totals={prepaid} settings={s} sheet />}
+      {receivable && <ReceivableBlock rf={receivable} settings={s} sheet />}
       <Signatures />
     </div>
   );

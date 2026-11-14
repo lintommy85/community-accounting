@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { allocateAll, findAmountMismatches, monthWriteOff, monthWriteOffByUnit, advancesFromAllocations, receiptBreakdown, summarizeUnit, unitNosFromPayments } from './allocation';
+import { allocateAll, chargeKindOfItem, dateOfBasis, findAmountMismatches, firstBillMonth, monthWriteOff, monthWriteOffByUnit, advancesFromAllocations, paidListForMonth, receiptBreakdown, summarizeUnit, unitNosFromPayments } from './allocation';
 import { emptyData } from './defaults';
-import { PREPAID_BEFORE_ITEM } from './dues';
+import { BILL_DEPOSIT, PREPAID_BEFORE_ITEM } from './dues';
 import { Due, Payment } from './types';
 
 let seq = 0;
@@ -189,6 +189,48 @@ describe('write-off print lists', () => {
   });
 });
 
+describe('管理費銷帳列出當月所有銷帳', () => {
+  const setupStartNov = () => {
+    const d = setup([
+      pay('A1-3F', '2026-10-15', 2000, '115/10', { depositDate: '2026-11-04' }),
+      pay('A1-5F', '2026-11-05', 2000, '115/11'),
+      pay('B2-2F', '2026-11-28', 2500, '115/11', { depositDate: '2026-12-03' }),
+    ], [], ['2026-11', '2026-12']);
+    d.settings.billingStartMonth = '2026-11';
+    return d;
+  };
+
+  it('counts every fee payment deposited this month, including bills before the start month, while 未繳 only uses this month', () => {
+    const d = setupStartNov();
+    const r = allocateAll(d);
+    const w = monthWriteOff(r, d.payments, '2026-11', dateOfBasis('deposit'));
+    expect([w.received, w.fromCurrent, w.receivedBeforeStart, w.fromLater, w.total, w.writtenOff, w.owing, w.owingUnits]).toEqual([4000, 2000, 2000, 2500, 6500, 4500, 2000, 1]);
+    expect(paidListForMonth(r, d.payments, '2026-11', dateOfBasis('deposit')).map((l) => [l.payment.unitNo, l.fee, l.beforeStart])).toEqual([['A1-3F', 2000, true], ['A1-5F', 2000, false]]);
+    const dec = monthWriteOff(r, d.payments, '2026-12', dateOfBasis('deposit'));
+    expect([dec.received, dec.receivedArrears, dec.fromCurrent]).toEqual([2500, 2500, 0]);
+  });
+
+  it('counts by paid date by default, so a payment made last month is not in this month', () => {
+    const d = setupStartNov();
+    const r = allocateAll(d);
+    const w = monthWriteOff(r, d.payments, '2026-11');
+    expect([w.received, w.fromCurrent, w.receivedBeforeStart, w.fromLater, w.total, w.owing]).toEqual([4500, 4500, 0, 0, 4500, 2000]);
+    expect(paidListForMonth(r, d.payments, '2026-11').map((l) => l.payment.unitNo)).toEqual(['A1-5F', 'B2-2F']);
+  });
+
+  it('adds payments that clear older months to this month’s write-off, and the total matches the bank deposits', () => {
+    const d = setup([pay('A1-3F', '2026-11-03', 4000, '115/10~115/11'), pay('B2-2F', '2026-11-10', 2500, '115/11')], [], ['2026-10', '2026-11']);
+    d.settings.billingStartMonth = '2026-10';
+    d.settings.units[1].openingPrepaid = 4000;
+    const r = allocateAll(d);
+    const w = monthWriteOff(r, d.payments, '2026-11', dateOfBasis('deposit'));
+    const banked = d.payments.filter((p) => p.depositDate.startsWith('2026-11')).reduce((s, p) => s + p.amount, 0);
+    expect([w.fromPrepaid, w.received, w.receivedArrears, w.fromCurrent, w.total, w.writtenOff, w.owing]).toEqual([2000, 6500, 2000, 4500, 8500, 6500, 0]);
+    expect(w.received).toBe(banked);
+    expect(w.total - w.fromPrepaid - w.fromLater - w.billOffset).toBe(banked);
+  });
+});
+
 describe('opening prepaid and unreconciled payments', () => {
   it('writes off months from the opening prepaid and keeps the rest as 預收款', () => {
     const d = setup([], [], ['2026-10', '2026-11']);
@@ -307,5 +349,74 @@ describe('payments for bills before the billing start month', () => {
     const r = allocateAll(d);
     expect(r.byKey.get('A1-3F')!.allocations.map((a) => a.month)).toEqual(['2026-11']);
     expect(r.byKey.get('A1-5F')!.allocations.map((a) => a.month)).toEqual(['2026-11']);
+  });
+
+  it('treats October payments as before the start even when the start month was set to October by carried arrears', () => {
+    // 起始月被帳單拆出的 10 月前期欠款帶到 2026-10，但第一個匯入的帳單是 11 月
+    const oct = pay('A1-3F', '2026-10-14', 2000, '115年10月管理費');
+    const arrears = pay('B2-2F', '2026-11-02', 2500, '115年10月管理費');
+    const d = fromNov([oct, arrears], [{ ...due('B2-2F', '2026-10', 2500, '前期欠款'), fromBill: '2026-11' }]);
+    d.settings.billingStartMonth = '2026-10';
+    expect(firstBillMonth(d.dues)).toBe('2026-11');
+    const r = allocateAll(d);
+    expect([r.trackFrom, r.preStartBefore]).toEqual(['2026-10', '2026-11']);
+    const a = r.byKey.get('A1-3F')!;
+    expect([a.allocations.length, a.credit, a.beforeStart.has(oct.id)]).toEqual([0, 0, true]);
+    expect(r.byKey.get('B2-2F')!.allocations.map((x) => [x.month, x.amount])).toEqual([['2026-10', 2500]]);
+    expect(findAmountMismatches(d, new Set([oct.id]))).toEqual([]);
+    // 之後匯入 11 月那筆：剛好銷 11 月，不會變成多繳
+    const nov = pay('A1-3F', '2026-11-10', 2000, '115年11月管理費');
+    d.payments.push(nov);
+    expect(findAmountMismatches(d, new Set([nov.id]))).toEqual([]);
+    expect(allocateAll(d).byKey.get('A1-3F')!.allocations.map((x) => [x.paymentId, x.month, x.amount])).toEqual([[nov.id, '2026-11', 2000]]);
+  });
+
+  it('writes October payments off to October once the October bill is imported', () => {
+    const oct = pay('A1-3F', '2026-10-14', 2000, '115年10月管理費');
+    const d = fromNov([oct], [due('A1-3F', '2026-10', 2000)]);
+    d.settings.billingStartMonth = '2026-10';
+    const acc = allocateAll(d).byKey.get('A1-3F')!;
+    expect(acc.allocations.map((x) => [x.month, x.amount])).toEqual([['2026-10', 2000]]);
+    expect(acc.beforeStart.size).toBe(0);
+  });
+});
+
+describe('payments whose period bill is not imported yet', () => {
+  it('keeps them as 暫收 instead of clearing another unpaid month, and writes them off once the bill is imported', () => {
+    // A1-3F 10、11 月都還沒繳；11 月 20 日先繳了 12 月（12 月帳單還沒匯入）
+    const dec = pay('A1-3F', '2026-11-20', 2000, '115年12月管理費');
+    const d = setup([dec], [], ['2026-10', '2026-11']);
+    const r = allocateAll(d);
+    const acc = r.byKey.get('A1-3F')!;
+    expect([acc.allocations.length, acc.credit, acc.pendingCredit.has(dec.id)]).toEqual([0, 2000, true]);
+    expect(advancesFromAllocations(r, d.payments, '2026-11')).toEqual({ prepaid: 0, suspense: 2000 });
+    expect(summarizeUnit(acc, '2026-10', '2026-11').owing).toBe(4000);
+    d.dues.push(...['A1-3F', 'A1-5F', 'B2-2F'].map((u) => due(u, '2026-12', u === 'B2-2F' ? 2500 : 2000)));
+    const after = allocateAll(d).byKey.get('A1-3F')!;
+    expect(after.allocations.map((x) => [x.month, x.amount])).toEqual([['2026-12', 2000]]);
+    expect(after.credit).toBe(0);
+  });
+
+  it('still clears older months with what is left after its own period', () => {
+    // 期別有應繳：先銷 11 月，多的照舊銷最早未繳的 10 月
+    const p = pay('A1-3F', '2026-11-05', 4000, '115年11月管理費');
+    const acc = allocateAll(setup([p], [], ['2026-10', '2026-11'])).byKey.get('A1-3F')!;
+    expect(acc.allocations.map((x) => [x.month, x.amount, x.source])).toEqual([['2026-10', 2000, 'auto'], ['2026-11', 2000, 'period']]);
+  });
+});
+
+describe('renovation deposits paid through the 智生活 payment report', () => {
+  it('recognises a year-labelled item such as 115年度裝潢保證金 once 裝潢保證金 is mapped', () => {
+    const p = pay('A1-3F', '2026-11-13', 36000, '115年度裝潢保證金', { item: '115年度裝潢保證金' });
+    const d = setup([p], [], ['2026-11']);
+    expect(chargeKindOfItem(p.item, d.settings)).toBeUndefined();
+    d.settings.billItemMap = { 裝潢保證金: BILL_DEPOSIT };
+    expect(chargeKindOfItem(p.item, d.settings)).toBe('deposit');
+    const r = allocateAll(d);
+    const acc = r.byKey.get('A1-3F')!;
+    expect([acc.allocations.length, acc.credit]).toEqual([0, 0]);
+    expect(acc.chargePaid).toEqual([{ paymentId: p.id, month: '2026-11', kind: 'deposit', amount: 36000 }]);
+    expect(advancesFromAllocations(r, d.payments, '2026-11')).toEqual({ prepaid: 0, suspense: 0 });
+    expect(findAmountMismatches(d, new Set([p.id]))).toEqual([]);
   });
 });

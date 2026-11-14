@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { localDate } from '../lib/dates';
 import { ownerHistory, removeOwnerPeriod, renameOwnerPeriod, setOwnerFrom } from '../lib/owners';
 import { Unit } from '../lib/types';
 import { useStore } from '../store';
@@ -41,7 +42,7 @@ export default function OwnerHistory({ unit, onClose }: { unit: Unit; onClose: (
                   <td>
                     <input defaultValue={p.owner} key={`${p.from}${p.owner}`} onBlur={(e) => e.target.value.trim() && e.target.value.trim() !== p.owner && save((x) => renameOwnerPeriod(x, p.from, e.target.value), '修正所有權人名稱', `${p.from || '最早'} ${e.target.value.trim()}`)} />
                   </td>
-                  <td className="muted">{p.source ? SOURCE_LABEL[p.source] : ''}{p.at ? ` ${p.at.slice(0, 10)}` : ''}</td>
+                  <td className="muted">{p.source ? SOURCE_LABEL[p.source] : ''}{p.at ? ` ${localDate(p.at)}` : ''}</td>
                   <td>{i > 0 && <button className="link danger" onClick={() => confirm(`刪除 ${p.from} 起的「${p.owner}」？這段期間會改回前一位所有權人。`) && save((x) => removeOwnerPeriod(x, p.from), '刪除所有權人變更', `${p.from} ${p.owner}`)}>刪除</button>}</td>
                 </tr>
               ))}

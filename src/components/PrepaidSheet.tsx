@@ -24,7 +24,7 @@ export default function PrepaidSheet({ data, month, rows, uses, printOnly }: { d
       <table className="fs-table">
         <thead>
           <tr><th colSpan={6} className="fs-in-head">預收款增減（{rows.length} 戶）</th></tr>
-          <tr className="fs-cols"><th>戶別</th><th>所有權人</th><th className="fs-num">上月底預收款</th><th className="fs-num">本月新增（預繳、多繳）</th><th className="fs-num">本月沖銷</th><th className="fs-num">月底預收款</th></tr>
+          <tr className="fs-cols"><th>戶別</th><th>所有權人</th><th className="fs-num">上月底預收款</th><th className="fs-num">本月新增（預繳、多繳）</th><th className="fs-num">本月沖銷</th><th className="fs-num">本月底剩餘預收款</th></tr>
         </thead>
         <tbody>
           {rows.map((r) => (

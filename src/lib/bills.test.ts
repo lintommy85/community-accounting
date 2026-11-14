@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { advancesFromAllocations, allocateAll, findAmountMismatches, prepaidLedger } from './allocation';
-import { applyBaselineUpdates, applyCycleUpdates, earlierStartMonth, isArrearsName, resolveBillItem, itemMonthSpan, SpanDecision, ARREARS_ITEM, BILL_ARREARS, BILL_ASIS, BILL_PREPAID, billItemName, DiffDecision, planBillImport, suggestBillItem } from './bills';
+import { advancesFromAllocations, allocateAll, findAmountMismatches, prepaidLedger, prepaidTotals } from './allocation';
+import { applyBaselineUpdates, applyCycleUpdates, applyPaymentKinds, earlierStartMonth, isArrearsName, needsPaymentKind, paymentKindOf, resolveBillItem, itemMonthSpan, SpanDecision, ARREARS_ITEM, BILL_ARREARS, BILL_ASIS, BILL_DEPOSIT, BILL_FINE, BILL_PREPAID, billItemName, DiffDecision, planBillImport, suggestBillItem } from './bills';
 import { emptyData } from './defaults';
 import { applyDueChanges, diffDues, DueRow } from './dues';
 import { setUnitItemBaseline, unitBaselines } from './fees';
@@ -210,6 +210,18 @@ describe('splitting 智生活 bills against the baseline', () => {
     const { rows, uses } = prepaidLedger(r, '2026-11');
     expect(rows.find((x) => x.unitNo === 'B')).toMatchObject({ opening: 3000, added: 0, used: 2500, closing: 500 });
     expect(uses.map((u) => [u.unitNo, u.payment.id, u.amount])).toEqual([['B', 'o', 2500]]);
+    const totals = prepaidTotals(rows);
+    expect(totals.closing).toBe(advancesFromAllocations(r, d.payments, '2026-11').prepaid);
+    expect(totals.opening - totals.used + totals.added).toBe(totals.closing);
+  });
+
+  it('sums the prepaid movement for the monthly report: 月初預收款－本月沖銷＋本期新增預收＝目前預收金額', () => {
+    const rows = [
+      { unitNo: 'A', owner: '', opening: 3000, added: 0, used: 2500, closing: 500 },
+      { unitNo: 'B', owner: '', opening: 0, added: 1200, used: 0, closing: 1200 },
+      { unitNo: 'C', owner: '', opening: 800, added: 0, used: 800, closing: 0 },
+    ];
+    expect(prepaidTotals(rows)).toEqual({ opening: 3800, used: 3300, added: 1200, closing: 1700, households: 2 });
   });
 
   it('keeps a payment as 暫收 while the bill for its period is not imported yet', () => {
@@ -342,5 +354,30 @@ describe('逾期類的帳單項目', () => {
     expect(earlierStartMonth('2026-11', ['2026-12'], dues)).toBe('');
     expect(earlierStartMonth('2026-11', ['2026-10'], dues)).toBe('2026-10');
     expect(earlierStartMonth('', ['2026-10'], dues)).toBe('');
+  });
+});
+
+describe('payment kinds on the 智生活 payment report', () => {
+  it('drops a year prefix such as 115年度 from item names', () => {
+    expect(billItemName('115年度裝潢保證金')).toBe('裝潢保證金');
+    expect(billItemName('115年10月管理費')).toBe('管理費');
+    expect(billItemName('2026年度罰款')).toBe('罰款');
+    expect(billItemName('管理費')).toBe('管理費');
+  });
+
+  it('guesses deposits and fines by name, prefers a saved mapping, and only asks for items that are not plainly 管理費', () => {
+    expect(paymentKindOf('115年度裝潢保證金', {})).toBe('deposit');
+    expect(paymentKindOf('違規停車罰款', {})).toBe('fine');
+    expect(paymentKindOf('停車費', {})).toBe('fee');
+    expect(paymentKindOf('裝潢保證金', { 裝潢保證金: '坪數費' })).toBe('fee');
+    expect(needsPaymentKind('管理費', {})).toBe(false);
+    expect(needsPaymentKind('115年度裝潢保證金', {})).toBe(true);
+    expect(needsPaymentKind('停車費', {})).toBe(true);
+  });
+
+  it('remembers deposit and fine choices and drops them again when changed back to 管理費', () => {
+    const map = applyPaymentKinds({ 年繳沖銷: BILL_PREPAID }, { 裝潢保證金: 'deposit', 罰款: 'fine', 停車費: 'fee' });
+    expect(map).toEqual({ 年繳沖銷: BILL_PREPAID, 裝潢保證金: BILL_DEPOSIT, 罰款: BILL_FINE });
+    expect(applyPaymentKinds(map, { 裝潢保證金: 'fee' })).toEqual({ 年繳沖銷: BILL_PREPAID, 罰款: BILL_FINE });
   });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FileDrop, Section } from '../components/ui';
 import { Icon } from '../components/icons';
+import { localDateTime } from '../lib/dates';
 import { emptyData } from '../lib/defaults';
 import { backupFileName, downloadBlob, listServiceBackups, normalizeData, openServiceDataDir, toBackupJson } from '../lib/storage';
 import { exportAllToExcel } from '../lib/xlsxio';
@@ -22,7 +23,7 @@ export default function BackupPage() {
     try {
       const restored = normalizeData(JSON.parse(await file.text()));
       const ok = confirm(
-        `確定用備份檔「${file.name}」覆蓋目前資料？\n\n備份內容：社區「${restored.settings.communityName}」、繳費 ${restored.payments.length} 筆、分錄 ${restored.entries.length} 筆、最後修改 ${restored.updatedAt.slice(0, 16).replace('T', ' ')}\n目前資料：繳費 ${data.payments.length} 筆、分錄 ${data.entries.length} 筆\n\n建議先下載目前資料的備份。`,
+        `確定用備份檔「${file.name}」覆蓋目前資料？\n\n備份內容：社區「${restored.settings.communityName}」、繳費 ${restored.payments.length} 筆、分錄 ${restored.entries.length} 筆、最後修改 ${localDateTime(restored.updatedAt)}\n目前資料：繳費 ${data.payments.length} 筆、分錄 ${data.entries.length} 筆\n\n建議先下載目前資料的備份。`,
       );
       if (!ok) return;
       replaceAll(restored, '還原備份');

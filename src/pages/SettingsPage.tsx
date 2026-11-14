@@ -10,7 +10,8 @@ import { activeUnits, deletedUnits, extraItem, feeItemNames, MGMT_ITEM, sortUnit
 import { BILL_ARREARS, BILL_ASIS, BILL_DEPOSIT, BILL_FINE, BILL_PREPAID, billTargetLabel } from '../lib/bills';
 
 const SPECIAL_TARGETS: string[] = [BILL_PREPAID, BILL_ARREARS, BILL_ASIS, BILL_FINE, BILL_DEPOSIT];
-import { Account, PettyCashEntry, ReminderMonths, Settings, SignatureSlot } from '../lib/types';
+import { Account, PettyCashEntry, ReminderMonths, ReportFields, Settings, SignatureSlot } from '../lib/types';
+import { optionalItemChoices, REPORT_LABEL_DEFAULTS, ReportLabelKey } from '../lib/receivable';
 import { useStore } from '../store';
 import { FEE_OTHER_FIXED, FEE_SUBJECT } from '../lib/statement';
 import { renovationAfterCategoryRename, renovationSettings } from '../lib/renovation';
@@ -76,6 +77,8 @@ export default function SettingsPage({ go }: { go: (p: PageKey) => void }) {
       </Section>
 
       <BillItemMapEditor />
+
+      <ReportFieldsEditor />
     </>
   );
 }
@@ -575,6 +578,103 @@ function ReminderEditor({ settings, onSave }: { settings: Settings; onSave: (r: 
           </label>
         ))}
       </div>
+    </Section>
+  );
+}
+
+const REPORT_FIELD_GROUPS: [string, ReportLabelKey[]][] = [
+  ['預收款項變動', ['ppTitle', 'ppRow', 'ppOpening', 'ppUsed', 'ppAdded', 'ppClosing']],
+  ['應收（未繳）管理費變動', ['arTitle', 'arPrior', 'arTransitIn', 'arBaseline', 'arPrepaidUsed', 'arWrittenOff', 'arUnapplied', 'arTransitOut', 'arResult']],
+];
+
+/** 月報欄位：預收款項變動與應收（未繳）管理費變動的欄位名稱（空白用預設名稱），以及可選的帳單項目。 */
+function ReportFieldsEditor() {
+  const { data, update } = useStore();
+  const s = data.settings;
+  const fields = s.reportFields ?? {};
+  const labels = fields.labels ?? {};
+  const items = fields.items ?? [];
+  const [pick, setPick] = useState('');
+  const save = (next: ReportFields, action: string, detail: string) =>
+    update((d) => ({ ...d, settings: { ...d.settings, reportFields: next } }), action, detail);
+  const choices = optionalItemChoices(s).filter((c) => !items.some((i) => i.bill === c));
+
+  function setLabel(k: ReportLabelKey, raw: string) {
+    const v = raw.trim() === REPORT_LABEL_DEFAULTS[k] ? '' : raw.trim();
+    if ((labels[k] ?? '') === v) return;
+    const next = { ...labels };
+    if (v) next[k] = v;
+    else delete next[k];
+    save({ ...fields, labels: next }, '修改月報欄位名稱', `${REPORT_LABEL_DEFAULTS[k]}→${v || '預設名稱'}`);
+  }
+
+  function setItemLabel(bill: string, raw: string) {
+    const v = raw.trim() === bill ? '' : raw.trim();
+    if ((items.find((i) => i.bill === bill)?.label ?? '') === v) return;
+    save({ ...fields, items: items.map((i) => (i.bill === bill ? { bill, ...(v ? { label: v } : {}) } : i)) }, '修改可選的帳單項目名稱', `${bill}→${v || '預設名稱'}`);
+  }
+
+  function addItem() {
+    if (!pick) return;
+    save({ ...fields, items: [...items, { bill: pick }] }, '新增可選的帳單項目', pick);
+    setPick('');
+  }
+
+  return (
+    <Section title="月報欄位名稱與可選的帳單項目">
+      <p className="hint">收支報表的月報畫面和列印的財務收支總表，在結存表（帳戶匯總）下面會列出「預收款項變動」和「應收（未繳）管理費變動」。顯示名稱空白就用預設名稱。</p>
+      <p className="hint">應收（未繳）管理費變動＝前期未繳（上個月底當時所有帳卡的欠費合計）＋截至本月入帳的在途款項（以前繳費、本月入帳）＋本月應收（所有戶別的基準費率加總）－本月預收款沖銷－本月已銷帳（本月入帳的管理費，以繳費金額計，不含罰款、裝潢保證金）＋本月繳款中的預收、暫收（是 0 時不列）－可選的帳單項目－截至目前的在途款（本月繳費、月底還沒入帳）。</p>
+      <div className="two-col">
+        {REPORT_FIELD_GROUPS.map(([title, keys]) => (
+          <div key={title}>
+            <h3 className="sub-title">{title}</h3>
+            <table className="compact-inputs">
+              <thead><tr><th>預設名稱</th><th>顯示名稱</th></tr></thead>
+              <tbody>
+                {keys.map((k) => (
+                  <tr key={k}>
+                    <td>{REPORT_LABEL_DEFAULTS[k]}</td>
+                    <td>
+                      <input defaultValue={labels[k] ?? ''} key={`${k}:${labels[k] ?? ''}`} placeholder={REPORT_LABEL_DEFAULTS[k]} aria-label={`${REPORT_LABEL_DEFAULTS[k]}的顯示名稱`}
+                        onBlur={(e) => setLabel(k, e.target.value)} onKeyDown={(e) => isEnterKey(e) && e.currentTarget.blur()} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+
+      <h3 className="sub-title">可選的帳單項目（{items.length}）</h3>
+      <p className="hint">從「帳單項目對應」選出要在應收（未繳）管理費變動中減掉的帳單項目（例如委員減免），每個項目列一行，金額是本月所有帳單上這個項目的合計（取正數），項目數量不限；沒有設定就不列出。沖銷類已經算在本月預收款沖銷、逾期類已經算在前期未繳，所以不能選。</p>
+      <table className="compact-inputs">
+        <thead><tr><th>帳單項目</th><th>顯示名稱</th><th></th></tr></thead>
+        <tbody>
+          {items.map((it) => (
+            <tr key={it.bill}>
+              <td><strong>{it.bill}</strong></td>
+              <td>
+                <input defaultValue={it.label ?? ''} key={`${it.bill}:${it.label ?? ''}`} placeholder={it.bill} aria-label={`${it.bill}的顯示名稱`}
+                  onBlur={(e) => setItemLabel(it.bill, e.target.value)} onKeyDown={(e) => isEnterKey(e) && e.currentTarget.blur()} />
+              </td>
+              <td>
+                <button className="link danger" onClick={() => confirm(`從可選的帳單項目刪除「${it.bill}」？`) && save({ ...fields, items: items.filter((x) => x.bill !== it.bill) }, '刪除可選的帳單項目', it.bill)}>刪除</button>
+              </td>
+            </tr>
+          ))}
+          {items.length === 0 && <tr><td colSpan={3} className="empty">還沒有設定，報表不會列出這一項。</td></tr>}
+          <tr className="add-row">
+            <td colSpan={2}>
+              <select value={pick} onChange={(e) => setPick(e.target.value)} aria-label="選擇帳單項目">
+                <option value="">— 選擇帳單項目 —</option>
+                {choices.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </td>
+            <td><button className="primary" disabled={!pick} onClick={addItem}>新增</button></td>
+          </tr>
+        </tbody>
+      </table>
     </Section>
   );
 }

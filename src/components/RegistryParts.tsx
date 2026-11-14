@@ -1,3 +1,4 @@
+import { localDateTime } from '../lib/dates';
 import { DueInfo, dueText } from '../lib/registry';
 import { TrackRecord } from '../lib/types';
 
@@ -7,13 +8,6 @@ export function DueTag({ due }: { due: DueInfo }) {
   const cls = due.state === 'overdue' ? 'tag danger' : due.state === 'soon' ? 'tag warn' : 'tag ok';
   return <span className={cls}>{dueText(due)}</span>;
 }
-
-const atText = (iso: string) => {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-};
 
 /** 修改紀錄：每次儲存時的到期日（或申報月份）、內容與修改時間；可以逐筆刪除。 */
 export function HistoryTable({ records, valueLabel, onDelete }: { records: TrackRecord[]; valueLabel: string; onDelete: (id: string) => void }) {
@@ -27,8 +21,8 @@ export function HistoryTable({ records, valueLabel, onDelete }: { records: Track
             <tr key={r.id}>
               <td>{r.value || '未填'}{i === 0 && <span className="tag info">最近一次</span>}</td>
               <td className="note-cell wide-note">{r.detail}</td>
-              <td>{atText(r.at)}</td>
-              <td><button className="link danger" onClick={() => confirm(`刪除這筆修改紀錄（${r.value || '未填'}，${atText(r.at)}）？`) && onDelete(r.id)}>刪除</button></td>
+              <td>{localDateTime(r.at)}</td>
+              <td><button className="link danger" onClick={() => confirm(`刪除這筆修改紀錄（${r.value || '未填'}，${localDateTime(r.at)}）？`) && onDelete(r.id)}>刪除</button></td>
             </tr>
           ))}
         </tbody>

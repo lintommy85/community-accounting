@@ -1,3 +1,4 @@
+import { localDateTime } from './dates';
 import { defaultAccounts, defaultSettings, emptyData, fileBase, presetFilings, withPettyOther } from './defaults';
 import { AppData, SCHEMA_VERSION } from './types';
 
@@ -88,7 +89,7 @@ export function downloadBlob(blob: Blob, fileName: string) {
 }
 
 export function backupFileName(data: AppData, ext = 'json'): string {
-  const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  const stamp = localDateTime(new Date().toISOString()).replace(/[-: ]/g, '');
   return `${fileBase(data.settings)}-帳務備份-${stamp}.${ext}`;
 }
 

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import IncomeExpenseTable from '../components/IncomeExpenseTable';
 import type { Go } from '../components/nav';
-import { lastMonth, Money, MonthInput, Section } from '../components/ui';
+import { Money, MonthInput, Section, thisMonth } from '../components/ui';
 import { Icon } from '../components/icons';
+import { localDate } from '../lib/dates';
 import { fileBase, formatMoney } from '../lib/defaults';
 import { monthReport, Totals } from '../lib/ledger';
 import { buildStatement, monthPeriods } from '../lib/statement';
@@ -24,7 +25,7 @@ function Row({ label, t, strong }: { label: string; t: Totals; strong?: boolean 
 
 export default function MonthReportPage({ go }: { go: Go }) {
   const { data, update } = useStore();
-  const [month, setMonth] = useState(lastMonth());
+  const [month, setMonth] = useState(thisMonth());
   const r = monthReport(data, month);
   const closed = data.closes.find((c) => c.month === month);
   const unconfirmed = data.payments.filter((p) => !p.voided && !p.depositConfirmed && p.depositDate >= r.start && p.depositDate <= r.end);
@@ -65,7 +66,7 @@ export default function MonthReportPage({ go }: { go: Go }) {
           {closed ? <button onClick={reopen}>解除月結</button> : <button className="primary" onClick={closeMonth}>結帳鎖定</button>}
         </div>
       </div>
-      {closed && <div className="banner ok no-print">此月份已於 {closed.closedAt.slice(0, 10)} 結帳鎖定。</div>}
+      {closed && <div className="banner ok no-print">此月份已於 {localDate(closed.closedAt)} 結帳鎖定。</div>}
       {r.checkDiff !== 0 && <div className="banner err">勾稽不平：差額 {formatMoney(r.checkDiff)} 元，請檢查入帳日早於繳費日的資料。</div>}
       {unconfirmed.length > 0 && <div className="banner warn no-print">本月有 {unconfirmed.length} 筆入帳尚未核對存摺。</div>}
 
