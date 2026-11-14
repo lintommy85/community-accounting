@@ -528,10 +528,6 @@ table.statement tr.st-net th, table.statement tr.st-net td, table.statement-bala
 
 /* 財務收支總表（列印用，仿智生活彩色格式） */
 .fin-sheet { -webkit-print-color-adjust: exact; print-color-adjust: exact; color: #111; font-size: 11px; }
-.fin-sheet .fs-header { display: flex; justify-content: space-between; align-items: flex-start; }
-.fin-sheet .fs-brand { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 700; color: #333; }
-.fin-sheet .fs-brand img { width: 28px; height: 28px; border-radius: 6px; object-fit: cover; }
-.fin-sheet .fs-stamp { font-size: 9px; color: #555; }
 .fin-sheet .fs-title { text-align: center; margin: 2px 0 6px; border-bottom: 1.5px solid #111; padding-bottom: 4px; }
 .fin-sheet .fs-org { font-size: 17px; font-weight: 700; }
 .fin-sheet .fs-sub { font-size: 12px; font-weight: 700; }
@@ -562,7 +558,8 @@ table.statement tr.st-net th, table.statement tr.st-net td, table.statement-bala
 .fin-sheet .fs-receivable, .fin-sheet .signatures { break-inside: avoid; page-break-inside: avoid; }
 .fin-sheet .sig-table th { background: #f2f2f2; }
 label.check.fee-fixed { margin: 0 0 0.4rem; font-size: 0.85rem; }
-@page { size: A4; margin: 10mm; }
+/* 頁邊放空白內容，瀏覽器就不會印預設的頁首、頁尾（日期、網頁標題、網址、頁碼） */
+@page { size: A4; margin: 10mm; @top-left { content: ''; } @bottom-left { content: ''; } }
 .wo-sheet .fs-table { margin-bottom: 12px; }
 .wo-sheet .wo-overdue { margin-left: 4px; color: #d6302a; font-size: 0.85em; }
 @media screen {

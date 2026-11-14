@@ -202,7 +202,10 @@ export interface ImportBatch {
 /** 零用金支出（獨立記錄，不直接列入收支表；每月使用總額以「零用金撥補」列為支出）。 */
 export interface PettyCashEntry {
   id: string;
+  /** 輸入日期：決定列在哪個月的零用金清單、撥補與月結。 */
   date: string;
+  /** 消費日期（發票、收據上的日期）：只顯示與匯出，和列在哪個月無關；沒有時同輸入日期。 */
+  spentDate?: string;
   /** 零用金科目；選「其他」時 item 為自行輸入的項目。 */
   category?: string;
   item: string;

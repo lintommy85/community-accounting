@@ -90,7 +90,7 @@ export function exportAllToExcel(data: AppData): Blob {
   );
   XLSX.utils.book_append_sheet(
     wb,
-    sheet(data.pettyCash.slice().sort((x, y) => x.date.localeCompare(y.date)).map((e) => ({ 日期: e.date, 項目: e.item, 金額: e.amount, 店家對象: e.payee, 備註: e.note }))),
+    sheet(data.pettyCash.slice().sort((x, y) => x.date.localeCompare(y.date)).map((e) => ({ 輸入日期: e.date, 消費日期: e.spentDate || e.date, 項目: e.item, 金額: e.amount, 店家對象: e.payee, 備註: e.note }))),
     '零用金',
   );
   XLSX.utils.book_append_sheet(

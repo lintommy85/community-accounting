@@ -4,8 +4,12 @@ import { LedgerEntry, PettyCashEntry } from './types';
 
 export const PETTY_CATEGORY = '零用金撥補';
 
+/** 消費日期；舊資料沒有時同輸入日期。 */
+export const spentDateOf = (e: PettyCashEntry) => e.spentDate || e.date;
+
+/** 某月的零用金支出：依輸入日期列入月份，同一天再依消費日期排序。 */
 export const pettyOfMonth = (entries: PettyCashEntry[], month: string) =>
-  entries.filter((e) => e.date.startsWith(month)).sort((a, b) => a.date.localeCompare(b.date));
+  entries.filter((e) => e.date.startsWith(month)).sort((a, b) => a.date.localeCompare(b.date) || spentDateOf(a).localeCompare(spentDateOf(b)));
 
 export const pettyTotal = (entries: PettyCashEntry[], month: string) => pettyOfMonth(entries, month).reduce((s, e) => s + e.amount, 0);
 
@@ -64,7 +68,7 @@ export interface PettyLedger {
 }
 
 /**
- * 零用金餘額：以零用金總額為起點，每筆支出扣除、撥補入帳時加回；
+ * 零用金餘額：以零用金總額為起點，每筆支出（依輸入日期）扣除、撥補入帳時加回；
  * 某月的期初餘額接續之前所有月份的支出與撥補。同一天先列支出再列撥補。
  */
 export function pettyLedger(petty: PettyCashEntry[], entries: LedgerEntry[], fund: number, month: string): PettyLedger {
@@ -77,7 +81,8 @@ export function pettyLedger(petty: PettyCashEntry[], entries: LedgerEntry[], fun
   const events: Omit<PettyLine, 'balance'>[] = [
     ...petty.filter((e) => e.date >= start && e.date <= end).map((e) => ({ date: e.date, kind: 'expense' as const, expense: e, out: e.amount, in: 0 })),
     ...replenishments.filter((e) => e.date >= start && e.date <= end).map((e) => ({ date: e.date, kind: 'replenish' as const, replenishment: e, out: 0, in: e.amount })),
-  ].sort((a, b) => a.date.localeCompare(b.date) || (a.kind === b.kind ? 0 : a.kind === 'expense' ? -1 : 1));
+  ];
+  events.sort((a, b) => a.date.localeCompare(b.date) || (a.kind === b.kind ? (a.expense && b.expense ? spentDateOf(a.expense).localeCompare(spentDateOf(b.expense)) : 0) : a.kind === 'expense' ? -1 : 1));
   let balance = opening;
   const lines = events.map((ev) => {
     balance += ev.in - ev.out;

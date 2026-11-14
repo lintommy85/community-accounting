@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyData } from './defaults';
 import { monthReport } from './ledger';
-import { defaultReplenishDate, PETTY_CATEGORY, pettyTotal, replenishmentOf, replenishReportMonths, upsertReplenishment } from './petty';
+import { defaultReplenishDate, PETTY_CATEGORY, pettyLedger, pettyOfMonth, pettyTotal, replenishmentOf, replenishReportMonths, spentDateOf, upsertReplenishment } from './petty';
 import { monthSheet } from './statement';
 
 describe('petty cash', () => {
@@ -82,5 +82,21 @@ describe('petty cash balance', () => {
     ]);
     entries = upsertReplenishment(entries, '2026-10', { date: '2026-10-31', accountId: 'acc_main', amount: 475, voucherNo: 'v1' });
     expect(pettyLedger(petty, entries, 10000, '2026-10').closing).toBe(10000);
+  });
+});
+
+describe('petty cash dates', () => {
+  it('lists petty cash by the entry date and keeps the spending date apart', () => {
+    const entries = [
+      { id: '1', date: '2026-11-03', spentDate: '2026-11-01', item: '郵資', amount: 125, payee: '', note: '' },
+      { id: '2', date: '2026-11-03', spentDate: '2026-10-28', item: '文具', amount: 350, payee: '', note: '' },
+      { id: '3', date: '2026-10-30', item: '茶水', amount: 500, payee: '', note: '' },
+    ];
+    expect(pettyOfMonth(entries, '2026-10').map((e) => e.id)).toEqual(['3']);
+    expect(pettyOfMonth(entries, '2026-11').map((e) => [e.id, spentDateOf(e)])).toEqual([['2', '2026-10-28'], ['1', '2026-11-01']]);
+    expect(pettyTotal(entries, '2026-11')).toBe(475);
+    expect(spentDateOf(entries[2])).toBe('2026-10-30');
+    const nov = pettyLedger(entries, [], 10000, '2026-11');
+    expect([nov.opening, ...nov.lines.map((l) => l.expense!.id), nov.closing]).toEqual([9500, '2', '1', 9025]);
   });
 });

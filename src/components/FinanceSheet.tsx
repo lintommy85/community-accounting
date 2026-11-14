@@ -1,5 +1,5 @@
 import { PrepaidTotals } from '../lib/allocation';
-import { appTitle, formatMoney } from '../lib/defaults';
+import { formatMoney } from '../lib/defaults';
 import { ReceivableRollForward } from '../lib/receivable';
 import { MonthReport } from '../lib/ledger';
 import { monthSheet, rocYear, SheetLine } from '../lib/statement';
@@ -37,7 +37,7 @@ function Rows({ income, expense }: { income: SheetLine[]; expense: SheetLine[] }
   );
 }
 
-/** 列印用的彩色「財務收支總表」（仿智生活格式）：收入與支出左右並排，分固定／非固定，接帳戶匯總、預收款項變動、應收（未繳）管理費變動與簽章。 */
+/** 列印用的彩色「財務收支總表」（仿智生活格式）：標題下收入與支出左右並排，分固定／非固定，接帳戶匯總、預收款項變動、應收（未繳）管理費變動與簽章。 */
 export default function FinanceSheet({ data, month, report, prepaid, receivable }: { data: AppData; month: string; report: MonthReport; prepaid?: PrepaidTotals | null; receivable?: ReceivableRollForward | null }) {
   const s = data.settings;
   const sheet = monthSheet(data, month);
@@ -50,19 +50,10 @@ export default function FinanceSheet({ data, month, report, prepaid, receivable 
   const pl = totalIn - totalOut;
   const balances = report.balances;
   const closingTotal = balances.reduce((t, b) => t + b.closing, 0);
-  const now = new Date();
-  const stamp = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const name = s.communityName.trim();
 
   return (
     <div className="fin-sheet">
-      <div className="fs-header">
-        <div className="fs-brand">
-          {s.logo && <img src={s.logo} alt="" />}
-          <span>{appTitle(s)}</span>
-        </div>
-        <div className="fs-stamp">製表日期：{stamp}</div>
-      </div>
       <div className="fs-title">
         <div className="fs-org">{name ? `${name}管理委員會` : '管理委員會'}</div>
         <div className="fs-sub">{rocYear(Number(month.slice(0, 4)))}年{Number(month.slice(5))}月 財務收支總表</div>

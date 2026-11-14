@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { isEnterKey, Money, MonthInput, Section, thisMonth } from '../components/ui';
 import { Icon } from '../components/icons';
+import PettySheet from '../components/PettySheet';
 import { monthEnd, monthOf, todayStr } from '../lib/dates';
 import { newId, PETTY_OTHER, resolveDepositAccountId } from '../lib/defaults';
-import { defaultReplenishDate, pettyLedger, pettyOfMonth, pettyTotal, replenishmentOf, replenishReportMonths, upsertReplenishment } from '../lib/petty';
+import { defaultReplenishDate, pettyLedger, pettyOfMonth, pettyTotal, replenishmentOf, replenishReportMonths, spentDateOf, upsertReplenishment } from '../lib/petty';
 import { LedgerEntry, PettyCashEntry } from '../lib/types';
 import { useStore } from '../store';
 
@@ -27,7 +28,8 @@ export default function PettyCashPage() {
   const categories = settings.pettyCategories;
   const otherRef = useRef<HTMLInputElement>(null);
 
-  const blank = () => ({ date: todayStr().startsWith(month) ? todayStr() : `${month}-01`, category: categories[0] ?? PETTY_OTHER, other: '', amount: '', payee: '', note: '' });
+  const defaultDate = () => (todayStr().startsWith(month) ? todayStr() : `${month}-01`);
+  const blank = () => ({ date: defaultDate(), spentDate: defaultDate(), category: categories[0] ?? PETTY_OTHER, other: '', amount: '', payee: '', note: '' });
   const [f, setF] = useState(blank);
   const [msg, setMsg] = useState('');
   const [nextMonth] = replenishReportMonths(month);
@@ -37,7 +39,7 @@ export default function PettyCashPage() {
   const [replMsg, setReplMsg] = useState('');
 
   useEffect(() => {
-    setF((prev) => (prev.date.startsWith(month) ? prev : { ...prev, date: todayStr().startsWith(month) ? todayStr() : `${month}-01` }));
+    setF((prev) => (prev.date.startsWith(month) ? prev : { ...prev, date: defaultDate(), spentDate: defaultDate() }));
     const rm = repl ? monthOf(repl.date) : replenishReportMonths(month)[0];
     setReportMonth(rm);
     setReplDate(repl?.date ?? defaultReplenishDate(month, rm));
@@ -58,11 +60,11 @@ export default function PettyCashPage() {
       otherRef.current?.focus();
       return setMsg('選「其他」時請輸入項目名稱');
     }
-    if (!f.date || !f.category || !Number.isFinite(amount) || !amount) return setMsg('請輸入日期、項目與金額');
+    if (!f.date || !f.spentDate || !f.category || !Number.isFinite(amount) || !amount) return setMsg('請輸入輸入日期、消費日期、項目與金額');
     if (isClosed(f.date)) return setMsg('該月份已結帳，請先解除月結');
-    const e: PettyCashEntry = { id: newId('pc_'), date: f.date, category: f.category, item: isOther ? f.other.trim() : f.category, amount, payee: f.payee.trim(), note: f.note.trim() };
+    const e: PettyCashEntry = { id: newId('pc_'), date: f.date, spentDate: f.spentDate, category: f.category, item: isOther ? f.other.trim() : f.category, amount, payee: f.payee.trim(), note: f.note.trim() };
     update((d) => ({ ...d, pettyCash: [...d.pettyCash, e] }), '新增零用金支出', `${e.date} ${e.item} ${e.amount}`);
-    setF({ ...blank(), date: f.date, category: f.category });
+    setF({ ...blank(), date: f.date, spentDate: f.date, category: f.category });
     setMsg('');
   }
 
@@ -100,7 +102,7 @@ export default function PettyCashPage() {
 
   return (
     <>
-      <div className="page-head">
+      <div className="page-head no-print">
         <h1>零用金</h1>
         <div className="actions">
           <MonthInput value={month} onChange={setMonth} />
@@ -108,10 +110,10 @@ export default function PettyCashPage() {
         </div>
       </div>
       <p className="hint no-print">
-        零用金的每筆支出記在這裡，不會出現在收支表。每月依使用總額向銀行帳戶申請撥補，收支表的支出只會出現一筆「零用金撥補」。
+        零用金的每筆支出記在這裡，不會出現在收支表。清單依「輸入日期」列入月份；「消費日期」是發票或收據上的日期，只供查看，不影響列在哪個月。每月依使用總額向銀行帳戶申請撥補，收支表的支出只會出現一筆「零用金撥補」。
       </p>
 
-      <Section title="零用金總額">
+      <Section title="零用金總額" className="no-print">
         <div className="form-row">
           <label className="no-print">零用金總額（定額）
             <input type="number" min={0} defaultValue={fund || ''} key={fund} placeholder="例如 10000"
@@ -130,10 +132,11 @@ export default function PettyCashPage() {
         {!fund && <p className="warn no-print">尚未設定零用金總額，餘額會從 0 開始計算。</p>}
       </Section>
 
-      <Section title={`${month} 零用金支出（${list.length} 筆，合計 ${total.toLocaleString('zh-TW')} 元）`}>
+      <Section title={`${month} 零用金支出（${list.length} 筆，合計 ${total.toLocaleString('zh-TW')} 元）`} className="no-print">
         {!locked && (
           <div className="form-row wrap no-print">
-            <label>日期<input type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></label>
+            <label title="決定列在哪個月的零用金清單">輸入日期<input type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></label>
+            <label title="發票、收據上的日期，不影響列在哪個月">消費日期<input type="date" value={f.spentDate} onChange={(e) => setF({ ...f, spentDate: e.target.value })} /></label>
             <label>項目
               <select
                 value={f.category}
@@ -159,14 +162,15 @@ export default function PettyCashPage() {
         {msg && <p className="err">{msg}</p>}
         <table className="report">
           <thead>
-            <tr><th>日期</th><th>項目</th><th>店家／對象</th><th>備註</th><th className="num">支出</th><th className="num">撥補</th><th className="num">餘額</th><th className="no-print"></th></tr>
+            <tr><th>輸入日期</th><th>消費日期</th><th>項目</th><th>店家／對象</th><th>備註</th><th className="num">支出</th><th className="num">撥補</th><th className="num">餘額</th><th className="no-print"></th></tr>
           </thead>
           <tbody>
-            <tr className="sub-line"><td>{month}-01</td><td colSpan={5}>上月結餘</td><td className="num"><Money value={ledger.opening} /></td><td className="no-print"></td></tr>
+            <tr className="sub-line"><td>{month}-01</td><td colSpan={6}>上月結餘</td><td className="num"><Money value={ledger.opening} /></td><td className="no-print"></td></tr>
             {ledger.lines.map((l) =>
               l.expense ? (
                 <tr key={l.expense.id} className={l.balance < 0 ? 'attention' : ''}>
                   <td>{l.date}</td>
+                  <td>{spentDateOf(l.expense)}</td>
                   <td>{l.expense.category === PETTY_OTHER ? `其他：${l.expense.item}` : l.expense.item}</td>
                   <td>{l.expense.payee}</td>
                   <td>{l.expense.note}</td>
@@ -178,6 +182,7 @@ export default function PettyCashPage() {
               ) : (
                 <tr key={l.replenishment!.id} className="petty-replenish">
                   <td>{l.date}</td>
+                  <td></td>
                   <td colSpan={3}>零用金撥補（{l.replenishment!.pettyMonth} 使用總額）</td>
                   <td></td>
                   <td className="num"><Money value={l.in} /></td>
@@ -186,9 +191,9 @@ export default function PettyCashPage() {
                 </tr>
               ),
             )}
-            {list.length === 0 && <tr><td colSpan={8} className="empty">本月沒有零用金支出。</td></tr>}
+            {list.length === 0 && <tr><td colSpan={9} className="empty">本月沒有零用金支出。</td></tr>}
             <tr className="total">
-              <th colSpan={4}>本月零用金使用總額／月底餘額</th>
+              <th colSpan={5}>本月零用金使用總額／月底餘額</th>
               <td className="num"><Money value={total} strong /></td>
               <td className="num">{ledger.lines.some((l) => l.in) ? <Money value={ledger.lines.reduce((sum, l) => sum + l.in, 0)} /> : ''}</td>
               <td className="num"><Money value={ledger.closing} strong /></td>
@@ -225,6 +230,10 @@ export default function PettyCashPage() {
         {status === 'ok' && changed && !replClosed && <p className="hint">已改了列入月報、撥補日期或帳戶，按「更新撥補」後才會生效。</p>}
         {status === 'none' && <p className="warn">本月尚未撥補。</p>}
       </Section>
+
+      <div className="print-only">
+        <PettySheet data={data} month={month} ledger={ledger} total={total} />
+      </div>
     </>
   );
 }
