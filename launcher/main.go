@@ -24,7 +24,16 @@ import (
 //go:embed web/index.html
 var webFS embed.FS
 
+// version 由打包時的 -ldflags 寫入（例如 v1.0.0）；直接執行原始碼時是 dev。
 var version = "dev"
+
+// versionLabel 顯示用的版本：打包的程式顯示「v1.0.0 正式版」，直接執行原始碼時顯示 dev。
+func versionLabel() string {
+	if version == "dev" {
+		return version
+	}
+	return version + " 正式版"
+}
 
 // buildID 由內嵌網頁內容計算，用來分辨執行中的服務是不是同一個版本。
 var buildID = func() string {
@@ -42,8 +51,9 @@ const (
 	basePort     = 17890
 	portTries    = 10
 	dataFile     = "ledger.json"
-	keepBackups  = 60
-	maxBody      = 512 << 20
+	// 每日備份只保留最近 30 天（含今天）。
+	keepBackupDays = 30
+	maxBody        = 512 << 20
 )
 
 type server struct {
@@ -89,7 +99,7 @@ func main() {
 	s.port = port
 
 	fmt.Println("========================================")
-	fmt.Println(" 社區帳務管理 " + version)
+	fmt.Println(" 社區帳務管理 " + versionLabel())
 	fmt.Println("========================================")
 	if created {
 		fmt.Println("已建立資料夾：", dataDir)
@@ -157,7 +167,7 @@ func listen(dataDir string) (net.Listener, int, bool) {
 		if other.Build == buildID {
 			return nil, p, true
 		}
-		fmt.Printf("偵測到舊版本（%s）正在執行，正在切換到新版本 %s…\n", other.Version, version)
+		fmt.Printf("偵測到舊版本（%s）正在執行，正在切換到新版本 %s…\n", other.Version, versionLabel())
 		if requestShutdown(p) {
 			for i := 0; i < 50; i++ {
 				if ln, err := net.Listen("tcp", addr); err == nil {
@@ -318,7 +328,7 @@ func (s *server) save(body []byte) error {
 			if err := copyFile(current, daily); err != nil {
 				return fmt.Errorf("備份失敗：%w", err)
 			}
-			s.pruneBackups()
+			s.pruneBackups(time.Now())
 		}
 	}
 	tmp := current + ".tmp"
@@ -369,10 +379,29 @@ func (s *server) backupFiles() []os.DirEntry {
 	return out
 }
 
-func (s *server) pruneBackups() {
-	files := s.backupFiles()
-	for i := keepBackups; i < len(files); i++ {
-		_ = os.Remove(filepath.Join(s.dataDir, "backups", files[i].Name()))
+// backupDate 備份的日期：每日備份從檔名 ledger-YYYYMMDD.json 取得，其他檔案用修改時間。
+func backupDate(e os.DirEntry) (time.Time, bool) {
+	name := e.Name()
+	if strings.HasPrefix(name, "ledger-") && len(name) == len("ledger-20060102.json") {
+		if t, err := time.ParseInLocation("20060102", name[len("ledger-"):len("ledger-20060102")], time.Local); err == nil {
+			return t, true
+		}
+	}
+	fi, err := e.Info()
+	if err != nil {
+		return time.Time{}, false
+	}
+	return fi.ModTime(), true
+}
+
+// pruneBackups 刪除超過 30 天的備份，只保留最近 30 天（含今天）；在每天第一次存檔、建立當天備份後執行，所以至少會留下當天那份。
+func (s *server) pruneBackups(now time.Time) {
+	y, m, d := now.Date()
+	cutoff := time.Date(y, m, d, 0, 0, 0, 0, now.Location()).AddDate(0, 0, -(keepBackupDays - 1))
+	for _, e := range s.backupFiles() {
+		if t, ok := backupDate(e); ok && t.Before(cutoff) {
+			_ = os.Remove(filepath.Join(s.dataDir, "backups", e.Name()))
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const sample = `{"app":"community-accounting-backup","data":{"settings":{},"payments":[]}}`
@@ -91,17 +92,51 @@ func TestRejectsForeignWritesAndHosts(t *testing.T) {
 	}
 }
 
-func TestPrunesOldBackups(t *testing.T) {
+func TestPrunesBackupsOlderThan30Days(t *testing.T) {
 	s, _ := newTestServer(t)
-	for i := 0; i < keepBackups+5; i++ {
-		name := filepath.Join(s.dataDir, "backups", "ledger-2025"+string(rune('A'+i/26))+string(rune('a'+i%26))+".json")
-		if err := os.WriteFile(name, []byte("{}"), 0o644); err != nil {
+	now := time.Date(2026, 11, 19, 10, 0, 0, 0, time.Local)
+	dir := filepath.Join(s.dataDir, "backups")
+	for i := 0; i < 40; i++ {
+		day := now.AddDate(0, 0, -i)
+		if err := os.WriteFile(filepath.Join(dir, "ledger-"+day.Format("20060102")+".json"), []byte("{}"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	s.pruneBackups()
-	if n := len(s.backupFiles()); n != keepBackups {
-		t.Fatalf("kept %d backups", n)
+	// 其他檔名的備份看修改時間：31 天前的刪除，3 天前的保留
+	for name, age := range map[string]int{"manual-old.json": 31, "manual-new.json": 3} {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mt := now.AddDate(0, 0, -age)
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.pruneBackups(now)
+	names := map[string]bool{}
+	for _, e := range s.backupFiles() {
+		names[e.Name()] = true
+	}
+	if len(names) != keepBackupDays+1 {
+		t.Fatalf("kept %d backups: %v", len(names), names)
+	}
+	oldest := "ledger-" + now.AddDate(0, 0, -(keepBackupDays-1)).Format("20060102") + ".json"
+	tooOld := "ledger-" + now.AddDate(0, 0, -keepBackupDays).Format("20060102") + ".json"
+	if !names[oldest] || names[tooOld] || !names["manual-new.json"] || names["manual-old.json"] {
+		t.Fatalf("wrong backups kept: %v", names)
+	}
+}
+
+func TestVersionLabel(t *testing.T) {
+	defer func(v string) { version = v }(version)
+	version = "dev"
+	if got := versionLabel(); got != "dev" {
+		t.Fatalf("dev label = %q", got)
+	}
+	version = "v1.0.0"
+	if got := versionLabel(); got != "v1.0.0 正式版" {
+		t.Fatalf("release label = %q", got)
 	}
 }
 

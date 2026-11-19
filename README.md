@@ -226,7 +226,7 @@ https://github.com/user-attachments/assets/b1d35ad9-959b-477a-bbb6-a65ed0f57786
 
 ## 資料與安全
 
-- 所有資料存在 exe 旁邊的 `data/ledger.json`，每天第一次存檔前自動備份到 `data/backups/`（最多 60 份）。
+- 所有資料存在 exe 旁邊的 `data/ledger.json`，每天第一次存檔前自動備份到 `data/backups/`（只保留最近 30 天）。
 - 「備份與還原」可以下載完整備份，也能還原任一天的備份檔。
 - 重複匯入同一份報表不會重複計算；已月結的月份會鎖定，不能再匯入或修改。
 - 每一次修改都記在操作紀錄裡。

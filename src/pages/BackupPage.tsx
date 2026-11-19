@@ -136,9 +136,9 @@ function ServiceDataSection() {
       <table className="kv">
         <tbody>
           <tr><th>資料檔</th><td><code>{service.dataFile}</code></td></tr>
-          <tr><th>每日備份</th><td><code>{service.dataDir}{service.dataDir.includes('\\') ? '\\' : '/'}backups</code>（每天第一次存檔前保留前一版，最多 60 份；目前 {backups?.length ?? service.backups} 份）</td></tr>
+          <tr><th>每日備份</th><td><code>{service.dataDir}{service.dataDir.includes('\\') ? '\\' : '/'}backups</code>（每天第一次存檔前保留前一版，只保留最近 30 天；目前 {backups?.length ?? service.backups} 份）</td></tr>
           <tr><th>存檔狀態</th><td>{saveError ? <span className="err">{saveError}</span> : lastSavedAt ? `已儲存 ${lastSavedAt}` : '每次修改後自動儲存'}</td></tr>
-          <tr><th>程式版本</th><td>{service.version}</td></tr>
+          <tr><th>程式版本</th><td>{service.version === 'dev' ? 'dev（直接執行原始碼）' : `${service.version} 正式版`}</td></tr>
         </tbody>
       </table>
       <p className="hint">
