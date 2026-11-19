@@ -1,4 +1,4 @@
-import { AllocationResult, allocateAll, isOpeningPayment } from './allocation';
+import { AllocationResult, allocateAll, DateBasis, dateOfBasis, isOpeningPayment } from './allocation';
 import { monthEnd, monthOf, parsePeriods } from './dates';
 import { normUnit, PRIOR_ITEM } from './dues';
 import { ownerAt } from './owners';
@@ -30,16 +30,24 @@ export interface ArrearsLine {
 }
 
 /** 建議的報表科目，例如「10月逾期汽車位清潔費」；帳單拆出的前期欠款為「10月前期欠款」。 */
-export const suggestArrearsLabel = (l: Pick<ArrearsLine, 'month' | 'item'>) =>
-  l.item === PRIOR_ITEM ? `${Number(l.month.slice(5))}月${PRIOR_ITEM}` : `${Number(l.month.slice(5))}月逾期${l.item}`;
+export function suggestArrearsLabel(l: Pick<ArrearsLine, 'month' | 'item' | 'paidDate'>): string {
+  const m = `${Number(l.month.slice(5))}月`;
+  if (l.item === PRIOR_ITEM) return `${m}${PRIOR_ITEM}`;
+  // 那個月就繳了、只是隔月才入帳（依入帳日認列時才會出現）：不是逾期
+  if (l.paidDate && l.paidDate <= monthEnd(l.month)) return `${m}${l.item}（${m}繳費）`;
+  return `${m}逾期${l.item}`;
+}
 
 /**
  * 某月份的逾期款項：本月繳款銷到以前月份的部分，依那個月的應繳項目拆開（照應繳項目的順序依序銷）；
  * 繳的是帳務起始月前帳單的整筆列出。和收支報表「補繳以前月份」的金額一致。
  */
-export function arrearsLines(data: AppData, month: string, alloc: AllocationResult = allocateAll(data)): ArrearsLine[] {
+export function arrearsLines(data: AppData, month: string, alloc: AllocationResult = allocateAll(data), basis: DateBasis = 'paid'): ArrearsLine[] {
   const start = `${month}-01`;
   const end = monthEnd(month);
+  // 本月的繳款依收支報表的認列方式：依繳費日或依入帳日
+  const dateOf = dateOfBasis(basis);
+  const inMonth = (d: string) => !!d && d >= start && d <= end;
   const labels = data.arrearsLabels ?? {};
   const out = new Map<string, ArrearsLine>();
   const push = (l: Omit<ArrearsLine, 'label'>) => {
@@ -48,7 +56,7 @@ export function arrearsLines(data: AppData, month: string, alloc: AllocationResu
     else out.set(l.key, { ...l, label: labels[l.key] ?? '' });
   };
   for (const acc of alloc.accounts) {
-    const pays = acc.feePayments.filter((p) => !isOpeningPayment(p.id) && !p.voided && p.paidDate >= start && p.paidDate <= end);
+    const pays = acc.feePayments.filter((p) => !isOpeningPayment(p.id) && !p.voided && inMonth(dateOf(p)));
     if (!pays.length) continue;
     const mine = new Set(pays.map((p) => p.id));
     const paid = new Map(acc.feePayments.map((p) => [p.id, p]));

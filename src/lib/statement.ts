@@ -1,5 +1,5 @@
 import { addMonths, monthEnd, monthRange } from './dates';
-import { AllocationResult, allocateAll, DateBasis, receiptBreakdown, receiptBreakdownBy } from './allocation';
+import { AllocationResult, allocateAll, DateBasis, dateOfBasis, receiptBreakdown, receiptBreakdownBy } from './allocation';
 import { FINE_LABEL, renovationSettings } from './renovation';
 import { arrearsLines, arrearsReportLines } from './arrears';
 import { resolveDepositAccountId } from './defaults';
@@ -99,14 +99,22 @@ export const BREAKDOWN_LABELS = {
   unmatched: '　其中：未對應門牌',
 } as const;
 
-/** 期間內繳費、到期末還沒撥入銀行的管理費（另列一行，不和當期銷帳等混在一起）。 */
-export const TRANSIT_LABEL = '　其中：在途存款';
+/**
+ * 在途那一行的名稱：依繳費日認列時是本月繳費、月底還沒入帳的（例如 11 月報表寫「11月在途存款」）；
+ * 依入帳日認列時是本月入帳、上個月就繳費的（寫「10月在途存款」）。年報欄位多，改寫「當月在途存款」「上月在途存款」。
+ */
+export function transitLabel(periods: Period[], basis: Basis): string {
+  if (periods.length !== 1) return basis === 'deposit' ? '　其中：上月在途存款' : '　其中：當月在途存款';
+  const month = periods[0].start.slice(0, 7);
+  return `　其中：${Number((basis === 'deposit' ? addMonths(month, -1) : month).slice(5))}月在途存款`;
+}
 /** 收入合計扣掉在途存款的部分。 */
 export const TOTAL_SETTLED_LABEL = '　其中：當期銷帳';
 
+
 /**
- * 管理費收入全額列入收款當期，並附上拆解列：期末還沒入帳的繳款整筆列為在途存款，
- * 其餘依銷帳月份拆成當期銷帳、預收、補繳以前月份、暫收、未對應門牌；依入帳日認列時沒有在途存款。
+ * 管理費收入全額列入收款當期，並附上拆解列：在途的繳款整筆另列一行，其餘依銷帳月份拆成當期銷帳、預收、補繳以前月份、暫收、未對應門牌。
+ * 在途：依繳費日認列時是期間內繳費、期末還沒入帳的（在途存款）；依入帳日認列時是期間內入帳、期間開始前就繳費的（上月在途存款）。
  * 金額都不含罰款、裝潢保證金。
  */
 function feeBreakdown(data: AppData, periods: Period[], opts: StatementOptions, alloc: AllocationResult | null): { lines: StatementLine[]; transit: number[] } {
@@ -117,7 +125,9 @@ function feeBreakdown(data: AppData, periods: Period[], opts: StatementOptions, 
     return p.amount - (c?.fine ?? 0) - (c?.deposit ?? 0);
   };
   const cols = periods.map((p) => {
-    const inTransit = opts.basis === 'deposit' ? [] : active(data.payments).filter((x) => x.paidDate >= p.start && x.paidDate <= p.end && (!x.depositDate || x.depositDate > p.end));
+    const inTransit = opts.basis === 'deposit'
+      ? active(data.payments).filter((x) => x.depositDate >= p.start && x.depositDate <= p.end && x.paidDate < p.start)
+      : active(data.payments).filter((x) => x.paidDate >= p.start && x.paidDate <= p.end && (!x.depositDate || x.depositDate > p.end));
     const skip = new Set(inTransit.map((x) => x.id));
     return {
       parts: receiptBreakdown(alloc, data.payments.filter((x) => !skip.has(x.id)), p.start, p.end, dateOf),
@@ -126,7 +136,7 @@ function feeBreakdown(data: AppData, periods: Period[], opts: StatementOptions, 
   });
   const lines = [
     ...(Object.keys(BREAKDOWN_LABELS) as (keyof typeof BREAKDOWN_LABELS)[]).map((k) => ({ label: BREAKDOWN_LABELS[k], values: cols.map((c) => Math.round(c.parts[k])), sub: true })),
-    { label: TRANSIT_LABEL, values: cols.map((c) => c.transit), sub: true },
+    { label: transitLabel(periods, opts.basis), values: cols.map((c) => c.transit), sub: true },
   ].filter((l) => l.values.some((v) => v !== 0));
   return { lines, transit: cols.map((c) => c.transit) };
 }
@@ -154,7 +164,7 @@ export function buildStatement(data: AppData, periods: Period[], opts: Statement
   const incomeSplit = transit.some((v) => v !== 0)
     ? [
         { label: TOTAL_SETTLED_LABEL, values: incomeTotals.map((v, i) => v - transit[i]), sub: true },
-        { label: TRANSIT_LABEL, values: transit, sub: true },
+        { label: transitLabel(periods, opts.basis), values: transit, sub: true },
       ]
     : [];
   return {
@@ -231,11 +241,17 @@ export const FEE_OTHER_FIXED = '管理費收入（逾期、預收、暫收）';
 /**
  * 財務收支總表（仿智生活格式）：管理費收入依收費項目拆成收入／預收款／逾期／暫收款，
  * 其他收入與支出逐筆列出；科目在 fixedCategories 中的列為固定收支。
+ * 管理費（含罰款、裝潢保證金）依收支報表選的認列方式列入月份：依繳費日或依入帳日。
  */
-export function monthSheet(data: AppData, month: string): MonthSheet {
+export function monthSheet(data: AppData, month: string, basis: Basis = 'paid'): MonthSheet {
   const { settings } = data;
   const start = `${month}-01`;
   const end = monthEnd(month);
+  const dateOf = dateOfBasis(basis);
+  const inMonth = (p: Payment) => {
+    const d = dateOf(p);
+    return !!d && d >= start && d <= end;
+  };
   const label = `${Number(month.slice(5))}月`;
   const fixed = new Set(settings.fixedCategories);
   const isFixed = (subject: string, item: string) => fixed.has(subject) || fixed.has(item);
@@ -258,12 +274,12 @@ export function monthSheet(data: AppData, month: string): MonthSheet {
   if (settings.units.some((u) => !u.deletedAt)) {
     const alloc = allocateAll(data);
     for (const p of active(data.payments)) {
-      const ch = p.paidDate >= start && p.paidDate <= end ? alloc.chargesByPayment.get(p.id) : undefined;
+      const ch = inMonth(p) ? alloc.chargesByPayment.get(p.id) : undefined;
       if (!ch) continue;
       mergeLine('income', FINE_LABEL, '罰款', '住戶', ch.fine);
       mergeLine('income', depositLabel, depositLabel, '住戶', ch.deposit);
     }
-    const groups = receiptBreakdownBy(alloc, data.payments, start, end, itemOf);
+    const groups = receiptBreakdownBy(alloc, data.payments, start, end, itemOf, dateOf);
     for (const [item, b] of Array.from(groups).sort((a, b2) => a[0].localeCompare(b2[0], 'zh-Hant'))) {
       fee(item, `${item}收入`, b.current, true);
       fee(item, `${item}預收款`, b.prepaid);
@@ -271,12 +287,12 @@ export function monthSheet(data: AppData, month: string): MonthSheet {
       fee(item, `${item}（未對應戶別）`, b.unmatched);
     }
     // 補繳以前月份（逾期）：依「逾期款項歸類」的科目列出，同一科目預設合併成一筆
-    for (const l of arrearsReportLines(arrearsLines(data, month, alloc), settings.arrearsMerge)) {
+    for (const l of arrearsReportLines(arrearsLines(data, month, alloc, basis), settings.arrearsMerge)) {
       income.push({ subject: FEE_SUBJECT, item: l.label, month: label, note: '住戶', amount: Math.round(l.amount), fixed: fixed.has(FEE_OTHER_FIXED) });
     }
   } else {
     const byItem = new Map<string, number>();
-    for (const p of active(data.payments)) if (p.paidDate >= start && p.paidDate <= end) byItem.set(itemOf(p), (byItem.get(itemOf(p)) ?? 0) + p.amount);
+    for (const p of active(data.payments)) if (inMonth(p)) byItem.set(itemOf(p), (byItem.get(itemOf(p)) ?? 0) + p.amount);
     for (const [item, amount] of byItem) fee(item, `${item}收入`, amount, true);
   }
 

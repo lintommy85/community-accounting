@@ -40,7 +40,7 @@ function Rows({ income, expense }: { income: SheetLine[]; expense: SheetLine[] }
 /** 列印用的彩色「財務收支總表」（仿智生活格式）：標題下收入與支出左右並排，分固定／非固定，接帳戶匯總、預收款項變動、應收（未繳）管理費變動與簽章。 */
 export default function FinanceSheet({ data, month, report, prepaid, receivable }: { data: AppData; month: string; report: MonthReport; prepaid?: PrepaidTotals | null; receivable?: ReceivableRollForward | null }) {
   const s = data.settings;
-  const sheet = monthSheet(data, month);
+  const sheet = monthSheet(data, month, report.basis);
   const fixedIn = sheet.income.filter((l) => l.fixed);
   const varIn = sheet.income.filter((l) => !l.fixed);
   const fixedOut = sheet.expense.filter((l) => l.fixed);

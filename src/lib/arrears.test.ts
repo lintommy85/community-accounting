@@ -57,3 +57,30 @@ describe('逾期款項', () => {
     expect(arrearsLines(d, '2026-11')).toEqual([]);
   });
 });
+
+describe('依入帳日認列', () => {
+  /** A 戶 10/30 繳 10 月、11/2 才入帳；B 戶 10/5 繳 10 月、當天入帳。 */
+  function lateDeposit(): AppData {
+    const d = setup();
+    d.payments = [
+      { ...pay('a1', 'A', '2026-10-30', 2500, '115/10'), depositDate: '2026-11-02' },
+      pay('b1', 'B', '2026-10-05', 2500, '115/10'),
+    ];
+    return d;
+  }
+  const sheetFee = (d: AppData, month: string, basis: 'paid' | 'deposit') =>
+    monthSheet(d, month, basis).income.filter((l) => l.subject === '管理費收入').map((l) => [l.item, l.amount]);
+
+  it('puts a payment deposited next month into that month for the report and its arrears lines', () => {
+    const d = lateDeposit();
+    expect(sheetFee(d, '2026-10', 'paid')).toEqual([['管理費收入', 5000]]);
+    expect(sheetFee(d, '2026-10', 'deposit')).toEqual([['管理費收入', 2500]]);
+    expect(arrearsLines(d, '2026-11', allocateAll(d), 'paid')).toEqual([]);
+    const lines = arrearsLines(d, '2026-11', allocateAll(d), 'deposit');
+    expect(lines.map((l) => [l.unitNo, l.month, l.item, l.amount])).toEqual([['A', '2026-10', '坪數費', 2000], ['A', '2026-10', '汽車位清潔費', 500]]);
+    // 10 月就繳了、只是 11 月才入帳，建議名稱不寫逾期
+    expect(lines.map((l) => suggestArrearsLabel(l))).toEqual(['10月坪數費（10月繳費）', '10月汽車位清潔費（10月繳費）']);
+    expect(sheetFee(d, '2026-11', 'deposit').reduce((t, [, v]) => t + (v as number), 0)).toBe(2500);
+    expect(sheetFee(d, '2026-11', 'paid')).toEqual([]);
+  });
+});

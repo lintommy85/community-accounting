@@ -30,7 +30,8 @@ export default function StatementPage() {
   const [mode, setMode] = useState<Mode>('month');
   const [month, setMonth] = useState(/^\d{4}-\d{2}$/.test(navArg) ? navArg : thisMonth());
   const [year, setYear] = useState(Number(thisMonth().slice(0, 4)));
-  const [basis, setBasis] = useState<Basis>('paid');
+  // 預設依入帳日認列，收入合計和撥入銀行的金額一致
+  const [basis, setBasis] = useState<Basis>('deposit');
   const [fund, setFund] = useState<FundFilter>('');
   const [printMode, setPrintMode] = useState<PrintMode>('statement');
   const [showDetail, setShowDetail] = useState(false);
@@ -41,7 +42,7 @@ export default function StatementPage() {
   const prepaidSum = useMemo(() => (prepaid ? prepaidTotals(prepaid.rows) : null), [prepaid]);
   const receivable = useMemo(() => (mode === 'month' && alloc ? receivableRollForward(data, alloc, month) : null), [data, alloc, mode, month]);
   // 本月繳款銷到以前月份的逾期款項：要先歸類報表科目才能列印月報
-  const arrears = useMemo(() => (mode === 'month' && alloc ? arrearsLines(data, month, alloc) : []), [data, alloc, mode, month]);
+  const arrears = useMemo(() => (mode === 'month' && alloc ? arrearsLines(data, month, alloc, basis) : []), [data, alloc, mode, month, basis]);
   const unclassified = arrears.filter((l) => !l.label).length;
   const arrearsRef = useRef<HTMLElement>(null);
   const toArrears = () => arrearsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });

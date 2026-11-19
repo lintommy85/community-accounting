@@ -198,11 +198,22 @@ describe('在途存款', () => {
     expect(st.income.map((l) => [l.label, ...l.values])).toEqual([
       ['管理費收入－管理費', 6000],
       ['　其中：當期銷帳', 2000],
-      ['　其中：在途存款', 4000],
+      ['　其中：10月在途存款', 4000],
       ['利息收入', 30],
     ]);
     expect(st.incomeTotals).toEqual([6030]);
-    expect(st.incomeSplit.map((l) => [l.label, ...l.values])).toEqual([['　其中：當期銷帳', 2030], ['　其中：在途存款', 4000]]);
+    expect(st.incomeSplit.map((l) => [l.label, ...l.values])).toEqual([['　其中：當期銷帳', 2030], ['　其中：10月在途存款', 4000]]);
+    const year = buildStatement(data(), yearPeriods(2026), { basis: 'paid', fund: '' });
+    expect(year.income.find((l) => l.label === '　其中：當月在途存款')?.values[9]).toBe(4000);
+  });
+
+  it('lists payments made last month and deposited this month apart when recognised by deposit date', () => {
+    const st = buildStatement(data(), monthPeriods('2026-11').slice(0, 1), { basis: 'deposit', fund: '' });
+    expect(st.income.map((l) => [l.label, ...l.values])).toEqual([['管理費收入－管理費', 2000], ['　其中：10月在途存款', 2000]]);
+    expect(st.incomeSplit.map((l) => [l.label, ...l.values])).toEqual([['　其中：當期銷帳', 0], ['　其中：10月在途存款', 2000]]);
+    const year = buildStatement(data(), yearPeriods(2026), { basis: 'deposit', fund: '' });
+    const prior = year.income.find((l) => l.label === '　其中：上月在途存款')!;
+    expect([prior.values[9], prior.values[10], prior.values[12]]).toEqual([0, 2000, 0]);
   });
 
   it('has no 在途存款 when the fee is recognised by deposit date', () => {

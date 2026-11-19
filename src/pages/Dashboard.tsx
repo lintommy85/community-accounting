@@ -9,15 +9,18 @@ import { resolveDepositAccountId } from '../lib/defaults';
 import { activeUnits, unitBaseline } from '../lib/fees';
 import { accountBalances, depositGroups, monthReport } from '../lib/ledger';
 import { registryAlerts, reminderMonths } from '../lib/registry';
+import { buildStatement, monthPeriods } from '../lib/statement';
 import { useStore } from '../store';
 
 export default function Dashboard({ go }: { go: Go }) {
   const { data, fileStatus } = useStore();
   const today = todayStr();
   const month = thisMonth();
-  const r = monthReport(data, month);
-  const monthIncome = r.received.gross + r.income.reduce((sum, i) => sum + i.amount, 0);
-  const monthExpense = r.expense.reduce((sum, i) => sum + i.amount, 0);
+  const r = monthReport(data, month, 'deposit');
+  // 本月總收入／總支出和收支報表的預設（依入帳日認列）相同：管理費依撥入銀行日列入
+  const st = buildStatement(data, monthPeriods(month).slice(0, 1), { basis: 'deposit', fund: '' });
+  const monthIncome = st.incomeTotals[0];
+  const monthExpense = st.expenseTotals[0];
   const bankIds = new Set(data.settings.accounts.filter((a) => a.kind === 'bank').map((a) => a.id));
   const bankBalances = accountBalances(data, today).filter((b) => bankIds.has(b.accountId));
   const bankTotal = bankBalances.reduce((sum, b) => sum + b.closing, 0);
@@ -61,8 +64,8 @@ export default function Dashboard({ go }: { go: Go }) {
     <>
       <CommunityProfile />
       <div className="stats">
-        <Stat label={`${month} 本月總收入`} icon="arrowDown" color="green" value={monthIncome} hint={`管理費 ${r.received.gross.toLocaleString('zh-TW')}＋其他收入 ${(monthIncome - r.received.gross).toLocaleString('zh-TW')}`} />
-        <Stat label={`${month} 本月總支出`} icon="arrowUp" color="red" value={monthExpense} hint={`${r.expense.length} 個科目`} />
+        <Stat label={`${month} 本月總收入`} icon="arrowDown" color="green" value={monthIncome} hint={`依入帳日：管理費 ${r.deposited.gross.toLocaleString('zh-TW')}＋其他收入 ${(monthIncome - r.deposited.gross).toLocaleString('zh-TW')}`} />
+        <Stat label={`${month} 本月總支出`} icon="arrowUp" color="red" value={monthExpense} hint={`${st.expense.length} 個科目`} />
         <Stat label={`${month} 本月結餘`} icon="scale" color="blue" value={monthIncome - monthExpense} hint="總收入－總支出" tone={monthIncome - monthExpense < 0 ? 'warn' : 'ok'} />
         <Stat label="銀行帳戶總餘額" icon="bank" color="purple" value={bankTotal} hint={`${bankBalances.length} 個銀行帳戶，截至 ${today}`} onClick={() => go('accounts')} />
       </div>
