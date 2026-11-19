@@ -516,7 +516,7 @@ table.statement tr.st-net th, table.statement tr.st-net td, table.statement-bala
 .ie-table .ie-out-head { background: #fbe3d3; }
 .ie-table .ie-in-total { background: #a9cfef; font-weight: 700; }
 .ie-table .ie-out-total { background: #f4b183; font-weight: 700; }
-.ie-table .ie-net { background: #fdf1cb; font-weight: 700; }
+.ie-table .ie-net { background: #fdf1cb; font-weight: 700; border-top: 2px solid var(--ink); }
 .ie-table .ie-split { border-left: 2px solid #c9ced6; }
 .ie-table .ie-sub { color: var(--muted); font-size: 0.85em; }
 .ie-table tr.total td.ie-blank { border: 0; background: transparent; }

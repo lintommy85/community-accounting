@@ -228,6 +228,7 @@ export function exportStatement(data: AppData, title: string, sub: string, st: S
     ['收入'],
     ...st.income.map((l) => line(l.label, l.values)),
     line('收入合計', st.incomeTotals),
+    ...st.incomeSplit.map((l) => line(l.label, l.values)),
     ['支出'],
     ...st.expense.map((l) => line(l.label, l.values)),
     line('支出合計', st.expenseTotals),

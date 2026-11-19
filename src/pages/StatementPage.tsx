@@ -46,7 +46,8 @@ export default function StatementPage() {
   const arrearsRef = useRef<HTMLElement>(null);
   const toArrears = () => arrearsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  const periods = mode === 'month' ? monthPeriods(month) : yearPeriods(year);
+  // 月報只列本月（不列本年累計），和月結的收支明細表相同
+  const periods = mode === 'month' ? monthPeriods(month).slice(0, 1) : yearPeriods(year);
   const st = buildStatement(data, periods, { basis, fund });
   const start = mode === 'month' ? `${month}-01` : `${year}-01-01`;
   const end = mode === 'month' ? monthEnd(month) : `${year}-12-31`;
@@ -157,6 +158,7 @@ export default function StatementPage() {
                 <tr className="st-in"><th colSpan={st.columns.length + 1}>收　入</th></tr>
                 {lineRows(st.income)}
                 <tr className="total st-in-total"><th>收入合計</th>{st.incomeTotals.map((v, i) => <td key={i} className="num"><Money value={v} strong /></td>)}</tr>
+                {lineRows(st.incomeSplit)}
                 <tr className="st-out"><th colSpan={st.columns.length + 1}>支　出</th></tr>
                 {lineRows(st.expense)}
                 <tr className="total st-out-total"><th>支出合計</th>{st.expenseTotals.map((v, i) => <td key={i} className="num"><Money value={v} strong /></td>)}</tr>

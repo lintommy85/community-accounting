@@ -12,9 +12,10 @@ function Side({ line, n, split }: { line?: StatementLine; n: number; split?: boo
   );
 }
 
-/** 收支明細表：收入與支出左右並列（與月結的收支明細表同一格式），合計與本期結餘上色。 */
+/** 收支明細表：收入與支出左右並列（與月結的收支明細表同一格式），合計與本期結餘上色；收入合計下面拆出當期銷帳與在途存款。 */
 export default function IncomeExpenseTable({ st }: { st: Statement }) {
   const n = st.columns.length;
+  const split = st.incomeSplit;
   const rows = Math.max(st.income.length, st.expense.length, 1);
   const cols = st.columns.map((c) => <th key={c} className="num">{c}</th>);
 
@@ -48,11 +49,18 @@ export default function IncomeExpenseTable({ st }: { st: Statement }) {
             <th className="ie-out-total ie-split">支出合計</th>
             {st.expenseTotals.map((v, i) => <td key={i} className="num ie-out-total"><Money value={v} strong /></td>)}
           </tr>
-          <tr className="total">
-            <td colSpan={n + 1} className="ie-blank" />
+          {/* 收入合計下面列出當期銷帳與在途存款（有在途存款時），本期結餘放在右邊第一列 */}
+          <tr className={split.length ? '' : 'total'}>
+            {split.length ? <Side line={split[0]} n={n} /> : <td colSpan={n + 1} className="ie-blank" />}
             <th className="ie-net ie-split">本期結餘（收入 - 支出）</th>
             {st.net.map((v, i) => <td key={i} className="num ie-net"><Money value={v} strong /></td>)}
           </tr>
+          {split.slice(1).map((l) => (
+            <tr key={l.label}>
+              <Side line={l} n={n} />
+              <Side n={n} split />
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>

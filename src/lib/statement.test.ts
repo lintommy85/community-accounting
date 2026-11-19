@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { emptyData } from './defaults';
 import { mergeRows } from './ledger';
 import { buildStatement, FEE_LABEL, monthPeriods, positionFor, yearPeriods } from './statement';
-import { LedgerEntry } from './types';
+import { Due, LedgerEntry, Payment } from './types';
 
 function fixture() {
   const d = emptyData();
@@ -168,5 +168,46 @@ describe('財務收支總表 lines', () => {
     ]);
     d.settings.fixedCategories = ['管理費收入', '管理費收入（逾期、預收、暫收）'];
     expect(monthSheet(d, '2026-10').income.filter((l) => l.subject === '管理費收入').every((l) => l.fixed)).toBe(true);
+  });
+});
+
+describe('在途存款', () => {
+  const pay = (id: string, unitNo: string, paidDate: string, depositDate: string, billPeriod: string): Payment => ({
+    id, batchId: 'b', unitNo, payerName: '', billPeriod, item: '管理費', paidDate, channel: 'ATM', amount: 2000, fee: 0,
+    reportDepositDate: depositDate, depositDate, depositConfirmed: !!depositDate, txnNo: '', status: '', note: '', voided: false,
+  });
+  const due = (unitNo: string, month: string): Due => ({ id: `${unitNo}${month}`, unitNo, month, item: '管理費', amount: 2000, source: 'import', note: '', updatedAt: '' });
+
+  /** A 戶 10/5 繳 10 月、10/7 入帳；B 戶 10/30 繳 10 月、11/2 才入帳；B 戶 10/31 補繳 9 月、還沒入帳；另有利息收入 30。 */
+  function data() {
+    const d = emptyData();
+    d.settings.billingStartMonth = '2026-09';
+    d.settings.units = [
+      { id: 'a', unitNo: 'A', owner: '', monthlyFee: 2000, note: '' },
+      { id: 'b', unitNo: 'B', owner: '', monthlyFee: 2000, note: '' },
+    ];
+    d.dues = [due('A', '2026-09'), due('B', '2026-09'), due('A', '2026-10'), due('B', '2026-10')];
+    d.payments = [pay('p1', 'A', '2026-09-05', '2026-09-06', '115/09'), pay('p2', 'A', '2026-10-05', '2026-10-07', '115/10'), pay('p3', 'B', '2026-10-30', '2026-11-02', '115/10'), pay('p4', 'B', '2026-10-31', '', '115/09')];
+    d.entries = [{ id: 'i1', date: '2026-10-20', type: 'income', category: '利息收入', accountId: 'acc_main', toAccountId: '', amount: 30, counterparty: '', voucherNo: '', note: '' }];
+    return d;
+  }
+
+  it('lists fee payments not yet deposited at month end apart from 當期銷帳 and splits the income total', () => {
+    const st = buildStatement(data(), monthPeriods('2026-10').slice(0, 1), { basis: 'paid', fund: '' });
+    expect(st.columns).toEqual(['本月']);
+    expect(st.income.map((l) => [l.label, ...l.values])).toEqual([
+      ['管理費收入－管理費', 6000],
+      ['　其中：當期銷帳', 2000],
+      ['　其中：在途存款', 4000],
+      ['利息收入', 30],
+    ]);
+    expect(st.incomeTotals).toEqual([6030]);
+    expect(st.incomeSplit.map((l) => [l.label, ...l.values])).toEqual([['　其中：當期銷帳', 2030], ['　其中：在途存款', 4000]]);
+  });
+
+  it('has no 在途存款 when the fee is recognised by deposit date', () => {
+    const st = buildStatement(data(), monthPeriods('2026-10').slice(0, 1), { basis: 'deposit', fund: '' });
+    expect(st.income.map((l) => [l.label, ...l.values])).toEqual([['管理費收入－管理費', 2000], ['　其中：當期銷帳', 2000], ['利息收入', 30]]);
+    expect(st.incomeSplit).toEqual([]);
   });
 });

@@ -4,7 +4,7 @@ import { FINE_LABEL, renovationSettings } from './renovation';
 import { arrearsLines, arrearsReportLines } from './arrears';
 import { resolveDepositAccountId } from './defaults';
 import { AccountBalance, accountBalances, active, advancesFor, inTransitAt, netAmount } from './ledger';
-import { Account, AppData, SignatureSlot } from './types';
+import { Account, AppData, Payment, SignatureSlot } from './types';
 
 export type Basis = DateBasis;
 export type FundFilter = '' | Account['fund'];
@@ -32,6 +32,8 @@ export interface Statement {
   income: StatementLine[];
   expense: StatementLine[];
   incomeTotals: number[];
+  /** 收入合計的拆解列（當期銷帳、在途存款），不計入合計；沒有在途存款時是空的。 */
+  incomeSplit: StatementLine[];
   expenseTotals: number[];
   net: number[];
 }
@@ -97,14 +99,36 @@ export const BREAKDOWN_LABELS = {
   unmatched: '　其中：未對應門牌',
 } as const;
 
-/** 管理費收入全額列入收款當期，並附上依銷帳月份的拆解列。 */
-function feeBreakdownLines(data: AppData, periods: Period[], opts: StatementOptions, alloc: AllocationResult | null): StatementLine[] {
-  if (!alloc) return [];
+/** 期間內繳費、到期末還沒撥入銀行的管理費（另列一行，不和當期銷帳等混在一起）。 */
+export const TRANSIT_LABEL = '　其中：在途存款';
+/** 收入合計扣掉在途存款的部分。 */
+export const TOTAL_SETTLED_LABEL = '　其中：當期銷帳';
+
+/**
+ * 管理費收入全額列入收款當期，並附上拆解列：期末還沒入帳的繳款整筆列為在途存款，
+ * 其餘依銷帳月份拆成當期銷帳、預收、補繳以前月份、暫收、未對應門牌；依入帳日認列時沒有在途存款。
+ * 金額都不含罰款、裝潢保證金。
+ */
+function feeBreakdown(data: AppData, periods: Period[], opts: StatementOptions, alloc: AllocationResult | null): { lines: StatementLine[]; transit: number[] } {
+  if (!alloc) return { lines: [], transit: periods.map(() => 0) };
   const dateOf = opts.basis === 'deposit' ? (p: { depositDate: string }) => p.depositDate : undefined;
-  const cols = periods.map((p) => receiptBreakdown(alloc, data.payments, p.start, p.end, dateOf));
-  return (Object.keys(BREAKDOWN_LABELS) as (keyof typeof BREAKDOWN_LABELS)[])
-    .map((k) => ({ label: BREAKDOWN_LABELS[k], values: cols.map((c) => Math.round(c[k])), sub: true }))
-    .filter((l) => l.values.some((v) => v !== 0));
+  const feeOf = (p: Payment) => {
+    const c = alloc.chargesByPayment.get(p.id);
+    return p.amount - (c?.fine ?? 0) - (c?.deposit ?? 0);
+  };
+  const cols = periods.map((p) => {
+    const inTransit = opts.basis === 'deposit' ? [] : active(data.payments).filter((x) => x.paidDate >= p.start && x.paidDate <= p.end && (!x.depositDate || x.depositDate > p.end));
+    const skip = new Set(inTransit.map((x) => x.id));
+    return {
+      parts: receiptBreakdown(alloc, data.payments.filter((x) => !skip.has(x.id)), p.start, p.end, dateOf),
+      transit: Math.round(inTransit.reduce((t, x) => t + feeOf(x), 0)),
+    };
+  });
+  const lines = [
+    ...(Object.keys(BREAKDOWN_LABELS) as (keyof typeof BREAKDOWN_LABELS)[]).map((k) => ({ label: BREAKDOWN_LABELS[k], values: cols.map((c) => Math.round(c.parts[k])), sub: true })),
+    { label: TRANSIT_LABEL, values: cols.map((c) => c.transit), sub: true },
+  ].filter((l) => l.values.some((v) => v !== 0));
+  return { lines, transit: cols.map((c) => c.transit) };
 }
 
 export function buildStatement(data: AppData, periods: Period[], opts: StatementOptions): Statement {
@@ -117,18 +141,28 @@ export function buildStatement(data: AppData, periods: Period[], opts: Statement
   };
   const income: StatementLine[] = lines('income', data.settings.incomeCategories);
   const feeAt = income.findIndex((l) => l.label === FEE_INCOME_LABEL);
+  let transit = periods.map(() => 0);
   if (feeAt >= 0 && (!opts.fund || data.settings.accounts.find((a) => a.id === resolveDepositAccountId(data.settings))?.fund === opts.fund)) {
-    income.splice(feeAt + 1, 0, ...feeBreakdownLines(data, periods, opts, alloc));
+    const fee = feeBreakdown(data, periods, opts, alloc);
+    income.splice(feeAt + 1, 0, ...fee.lines);
+    transit = fee.transit;
   }
   const expense = lines('expense', [...data.settings.expenseCategories, FEE_LABEL]);
   const sum = (ls: StatementLine[]) => periods.map((_, i) => ls.reduce((s, l) => s + (l.sub ? 0 : l.values[i]), 0));
   const incomeTotals = sum(income);
   const expenseTotals = sum(expense);
+  const incomeSplit = transit.some((v) => v !== 0)
+    ? [
+        { label: TOTAL_SETTLED_LABEL, values: incomeTotals.map((v, i) => v - transit[i]), sub: true },
+        { label: TRANSIT_LABEL, values: transit, sub: true },
+      ]
+    : [];
   return {
     columns: periods.map((p) => p.label),
     income,
     expense,
     incomeTotals,
+    incomeSplit,
     expenseTotals,
     net: incomeTotals.map((v, i) => v - expenseTotals[i]),
   };
